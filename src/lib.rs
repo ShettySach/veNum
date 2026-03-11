@@ -7,9 +7,10 @@ __   _____  /\ \ \_   _ _ __ ___
   \_/ \___\_\ \/  \__,_|_| |_| |_|
 ```
 
-Vectorized N-dimensional numerical arrays.
+Vectorized _N_-dimensional numerical arrays.
 */
 
 mod core;
 pub use core::conv;
+pub use core::delayed_ops::DTensor;
 pub use core::Tensor;

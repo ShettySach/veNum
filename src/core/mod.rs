@@ -1,3 +1,4 @@
+pub mod delayed_ops;
 mod display;
 mod errors;
 mod iters;
