@@ -1,15 +1,15 @@
 use anyhow::{anyhow, Result};
 use image::{ImageBuffer, RgbImage};
 use std::{fmt::Display, ops::Div, path::Path};
-use venum::{conv::Mode, Tensor};
+use venum::{conv::Mode, ETensor};
 
 fn main() -> Result<()> {
     let (image, width, height) = read_image("assets/venom.png")?;
-    let image_tensor = Tensor::new(&image, &[3, height as usize, width as usize])?;
+    let image_tensor = ETensor::new(&image, &[3, height as usize, width as usize])?;
 
     // Gaussian blur
 
-    let blur_kernel = Tensor::new(
+    let blur_kernel = ETensor::new(
         &[
             1.0, 2.0, 1.0, // Gaussian
             2.0, 4.0, 2.0, // Blur
@@ -24,7 +24,7 @@ fn main() -> Result<()> {
 
     // Sharpen
 
-    let sharpen_kernel = Tensor::new(
+    let sharpen_kernel = ETensor::new(
         &[
             0.0, -1.0, 0.0, // Sharpen
             -1.0, 5.0, -1.0, // Features
@@ -38,7 +38,7 @@ fn main() -> Result<()> {
 
     // Edge
 
-    let edge_kernel = Tensor::new(
+    let edge_kernel = ETensor::new(
         &[
             0.0, -1.0, 0.0, // Laplacian
             -1.0, 4.0, -1.0, // Edge Detection
@@ -50,7 +50,7 @@ fn main() -> Result<()> {
     let edge = image_tensor.correlate_2d(&edge_kernel, &[1, 1], Mode::Same)?;
     write_image(&edge, "assets/edge.png")?;
 
-    let green_edge_kernel = Tensor::new(
+    let green_edge_kernel = ETensor::new(
         &[
             0.0, 0.0, 0.0, //
             0.0, 0.0, 0.0, //
@@ -93,7 +93,7 @@ where
     Ok((f32_data, width, height))
 }
 
-fn write_image<P>(tensor: &Tensor<f32>, path: P) -> Result<()>
+fn write_image<P>(tensor: &ETensor<f32>, path: P) -> Result<()>
 where
     P: AsRef<Path> + Display,
 {

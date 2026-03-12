@@ -1,11 +1,11 @@
-use venum::Tensor;
+use venum::ETensor;
 
 fn main() -> anyhow::Result<()> {
-    let a = Tensor::linspace(1, 5, 5)?;
+    let a = ETensor::linspace(1, 5, 5)?;
     println!("a");
     println!("{}", &a);
 
-    let b = Tensor::linspace(1, 5, 5)?.view(&[5, 1])?;
+    let b = ETensor::linspace(1, 5, 5)?.view(&[5, 1])?;
     println!("b");
     println!("{}", &b);
 

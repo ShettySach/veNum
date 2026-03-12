@@ -5,20 +5,21 @@ use std::{
     ops::Div,
 };
 
-use crate::{conv::Mode, core::iters::Strider, Tensor};
+use crate::core::eager::{conv::Mode, ETensor};
+use crate::core::iters::Strider;
 
-impl<T> Tensor<T>
+impl<T> ETensor<T>
 where
     T: Copy + Product<T> + Sum<T> + PartialOrd + Default,
 {
     pub fn pool_1d(
         &self,
-        f: impl Fn(&Tensor<T>, &[usize], bool) -> Result<Tensor<T>>,
+        f: impl Fn(&ETensor<T>, &[usize], bool) -> Result<ETensor<T>>,
         pool_sizes: &[usize; 1],
         strides: &[usize; 1],
         mode: Mode,
         keepdims: bool,
-    ) -> Result<Tensor<T>> {
+    ) -> Result<ETensor<T>> {
         let i_first = self.rank() - 1;
         let input_width = self.shape.sizes[i_first];
         let input_sizes = &[input_width];
@@ -46,17 +47,17 @@ where
             }
         }
 
-        Tensor::init(data, &sizes)
+        ETensor::init(data, &sizes)
     }
 
     pub fn pool_2d(
         &self,
-        f: impl Fn(&Tensor<T>, &[usize], bool) -> Result<Tensor<T>>,
+        f: impl Fn(&ETensor<T>, &[usize], bool) -> Result<ETensor<T>>,
         pool_sizes: &[usize; 2],
         strides: &[usize; 2],
         mode: Mode,
         keepdims: bool,
-    ) -> Result<Tensor<T>> {
+    ) -> Result<ETensor<T>> {
         let n = self.rank();
         let input_dims = &[n - 2, n - 1];
         let input_sizes = &[
@@ -90,7 +91,7 @@ where
             }
         }
 
-        Tensor::init(data, &sizes)
+        ETensor::init(data, &sizes)
     }
 
     // 1D
@@ -101,8 +102,8 @@ where
         strides: &[usize; 1],
         mode: Mode,
         keepdims: bool,
-    ) -> Result<Tensor<T>> {
-        self.pool_1d(Tensor::max_dims, pool_sizes, strides, mode, keepdims)
+    ) -> Result<ETensor<T>> {
+        self.pool_1d(ETensor::max_dims, pool_sizes, strides, mode, keepdims)
     }
 
     pub fn min_pool_1d(
@@ -111,8 +112,8 @@ where
         strides: &[usize; 1],
         mode: Mode,
         keepdims: bool,
-    ) -> Result<Tensor<T>> {
-        self.pool_1d(Tensor::min_dims, pool_sizes, strides, mode, keepdims)
+    ) -> Result<ETensor<T>> {
+        self.pool_1d(ETensor::min_dims, pool_sizes, strides, mode, keepdims)
     }
 
     pub fn sum_pool_1d(
@@ -121,8 +122,8 @@ where
         strides: &[usize; 1],
         mode: Mode,
         keepdims: bool,
-    ) -> Result<Tensor<T>> {
-        self.pool_1d(Tensor::sum_dims, pool_sizes, strides, mode, keepdims)
+    ) -> Result<ETensor<T>> {
+        self.pool_1d(ETensor::sum_dims, pool_sizes, strides, mode, keepdims)
     }
 
     pub fn product_pool_1d(
@@ -131,8 +132,8 @@ where
         strides: &[usize; 1],
         mode: Mode,
         keepdims: bool,
-    ) -> Result<Tensor<T>> {
-        self.pool_1d(Tensor::product_dims, pool_sizes, strides, mode, keepdims)
+    ) -> Result<ETensor<T>> {
+        self.pool_1d(ETensor::product_dims, pool_sizes, strides, mode, keepdims)
     }
 
     pub fn mean_pool_1d(
@@ -141,11 +142,11 @@ where
         strides: &[usize; 1],
         mode: Mode,
         keepdims: bool,
-    ) -> Result<Tensor<T>>
+    ) -> Result<ETensor<T>>
     where
         T: Div<Output = T> + FromPrimitive,
     {
-        self.pool_1d(Tensor::mean_dims, pool_sizes, strides, mode, keepdims)
+        self.pool_1d(ETensor::mean_dims, pool_sizes, strides, mode, keepdims)
     }
 
     // 2D
@@ -156,8 +157,8 @@ where
         strides: &[usize; 2],
         mode: Mode,
         keepdims: bool,
-    ) -> Result<Tensor<T>> {
-        self.pool_2d(Tensor::max_dims, pool_sizes, strides, mode, keepdims)
+    ) -> Result<ETensor<T>> {
+        self.pool_2d(ETensor::max_dims, pool_sizes, strides, mode, keepdims)
     }
 
     pub fn min_pool_2d(
@@ -166,8 +167,8 @@ where
         strides: &[usize; 2],
         mode: Mode,
         keepdims: bool,
-    ) -> Result<Tensor<T>> {
-        self.pool_2d(Tensor::min_dims, pool_sizes, strides, mode, keepdims)
+    ) -> Result<ETensor<T>> {
+        self.pool_2d(ETensor::min_dims, pool_sizes, strides, mode, keepdims)
     }
 
     pub fn sum_pool_2d(
@@ -176,8 +177,8 @@ where
         strides: &[usize; 2],
         mode: Mode,
         keepdims: bool,
-    ) -> Result<Tensor<T>> {
-        self.pool_2d(Tensor::sum_dims, pool_sizes, strides, mode, keepdims)
+    ) -> Result<ETensor<T>> {
+        self.pool_2d(ETensor::sum_dims, pool_sizes, strides, mode, keepdims)
     }
 
     pub fn product_pool_2d(
@@ -186,8 +187,8 @@ where
         strides: &[usize; 2],
         mode: Mode,
         keepdims: bool,
-    ) -> Result<Tensor<T>> {
-        self.pool_2d(Tensor::product_dims, pool_sizes, strides, mode, keepdims)
+    ) -> Result<ETensor<T>> {
+        self.pool_2d(ETensor::product_dims, pool_sizes, strides, mode, keepdims)
     }
 
     pub fn mean_pool_2d(
@@ -196,10 +197,10 @@ where
         strides: &[usize; 2],
         mode: Mode,
         keepdims: bool,
-    ) -> Result<Tensor<T>>
+    ) -> Result<ETensor<T>>
     where
         T: Div<Output = T> + FromPrimitive,
     {
-        self.pool_2d(Tensor::mean_dims, pool_sizes, strides, mode, keepdims)
+        self.pool_2d(ETensor::mean_dims, pool_sizes, strides, mode, keepdims)
     }
 }

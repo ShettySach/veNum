@@ -1,7 +1,7 @@
-use venum::Tensor;
+use venum::ETensor;
 
 fn main() -> anyhow::Result<()> {
-    let tensor = Tensor::eye(3)?;
+    let tensor = ETensor::eye(3)?;
     println!("{}", tensor);
 
     let unary_fn: fn(f32) -> f32 = |x| (x + 5.0) / 10.0;
@@ -24,7 +24,7 @@ fn main() -> anyhow::Result<()> {
     let sz = tensor.slice_zip(arr, |_, y| y, &[(1, 3), (1, 3)])?; // Slice assign
     println!("{}", sz);
 
-    let bool_tensor = Tensor::new(
+    let bool_tensor = ETensor::new(
         &[
             false, true, false, //
             false, true, true, //
@@ -34,7 +34,7 @@ fn main() -> anyhow::Result<()> {
     )?;
     println!("{}", bool_tensor);
 
-    let bool_sum = |bool_tensor: &Tensor<bool>| {
+    let bool_sum = |bool_tensor: &ETensor<bool>| {
         Ok(bool_tensor.data().iter().filter(|&&b| b).count()) // Count of true values
     };
 

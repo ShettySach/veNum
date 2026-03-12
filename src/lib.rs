@@ -11,6 +11,6 @@ Vectorized _N_-dimensional numerical arrays.
 */
 
 mod core;
-pub use core::conv;
-pub use core::delayed_ops::DTensor;
-pub use core::Tensor;
+pub use core::eager::ops::conv;
+pub use core::eager::ETensor;
+pub use core::lazy::LTensor;

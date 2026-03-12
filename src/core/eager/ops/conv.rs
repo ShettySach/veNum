@@ -1,10 +1,7 @@
 use anyhow::{Ok, Result};
 use std::{iter::Sum, ops::Mul};
 
-use crate::{
-    core::{iters::Strider, shape::Shape},
-    Tensor,
-};
+use crate::{core::eager::ETensor, core::iters::Strider, core::shape::Shape};
 
 pub enum Mode {
     Valid,
@@ -12,16 +9,16 @@ pub enum Mode {
     Same,
 }
 
-impl<T> Tensor<T>
+impl<T> ETensor<T>
 where
     T: Copy + Mul<Output = T> + Sum<T> + Default,
 {
     pub fn correlate_1d(
         &self,
-        kernel: &Tensor<T>,
+        kernel: &ETensor<T>,
         strides: &[usize; 1],
         mode: Mode,
-    ) -> Result<Tensor<T>> {
+    ) -> Result<ETensor<T>> {
         let i_zero = self.rank() - 1;
         let input_width = self.shape.sizes[i_zero];
         let input_conv_sizes = &[input_width];
@@ -58,15 +55,15 @@ where
             }
         }
 
-        Tensor::init(data, &sizes)
+        ETensor::init(data, &sizes)
     }
 
     pub fn correlate_2d(
         &self,
-        kernel: &Tensor<T>,
+        kernel: &ETensor<T>,
         strides: &[usize; 2],
         mode: Mode,
-    ) -> Result<Tensor<T>> {
+    ) -> Result<ETensor<T>> {
         let n = self.rank();
         let input_dims = &[n - 2, n - 1];
         let input_sizes = &[
@@ -110,24 +107,24 @@ where
             }
         }
 
-        Tensor::init(data, &sizes)
+        ETensor::init(data, &sizes)
     }
 
     pub fn convolve_1d(
         &self,
-        kernel: &Tensor<T>,
+        kernel: &ETensor<T>,
         strides: &[usize; 1],
         mode: Mode,
-    ) -> Result<Tensor<T>> {
+    ) -> Result<ETensor<T>> {
         self.correlate_1d(&kernel.flip_all()?, strides, mode)
     }
 
     pub fn convolve_2d(
         &self,
-        kernel: &Tensor<T>,
+        kernel: &ETensor<T>,
         strides: &[usize; 2],
         mode: Mode,
-    ) -> Result<Tensor<T>> {
+    ) -> Result<ETensor<T>> {
         self.correlate_2d(&kernel.flip_all()?, strides, mode)
     }
 }

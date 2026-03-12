@@ -1,9 +1,9 @@
 use anyhow::Result;
-use venum::{conv::Mode, Tensor};
+use venum::{conv::Mode, ETensor};
 
 fn main() -> Result<()> {
-    let input = Tensor::arange(0.0, 32.0, 1.0)?.view(&[2, 4, 4])?;
-    let kernel = Tensor::ones(4)?.view(&[2, 2])?;
+    let input = ETensor::arange(0.0, 32.0, 1.0)?.view(&[2, 4, 4])?;
+    let kernel = ETensor::ones(4)?.view(&[2, 2])?;
     let strides = &[1, 1];
 
     println!("Input: \n{}", input);

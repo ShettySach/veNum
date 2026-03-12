@@ -7,9 +7,9 @@ use std::{
     fmt::{Debug, Display, Formatter, Result},
 };
 
-use crate::{core::shape::offset_fn, Tensor};
+use crate::{core::eager::ETensor, core::shape::offset_fn};
 
-impl<T: Debug + Copy> Debug for Tensor<T> {
+impl<T: Debug + Copy> Debug for ETensor<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         f.debug_struct("Tensor")
             .field("dtype", &type_name::<T>())
@@ -20,7 +20,7 @@ impl<T: Debug + Copy> Debug for Tensor<T> {
     }
 }
 
-impl<T: Display + Debug + Copy> Display for Tensor<T> {
+impl<T: Display + Debug + Copy> Display for ETensor<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         let n = self.rank();
 
@@ -40,7 +40,7 @@ impl<T: Display + Debug + Copy> Display for Tensor<T> {
     }
 }
 
-fn odd_dimensions<T>(tensor: &Tensor<T>, n: usize, stride_offset: usize) -> Row
+fn odd_dimensions<T>(tensor: &ETensor<T>, n: usize, stride_offset: usize) -> Row
 where
     T: Copy + Display,
 {
@@ -64,7 +64,7 @@ where
     }
 }
 
-fn even_dimensions<T>(tensor: &Tensor<T>, n: usize, stride_offset: usize) -> Table
+fn even_dimensions<T>(tensor: &ETensor<T>, n: usize, stride_offset: usize) -> Table
 where
     T: Copy + Display,
 {

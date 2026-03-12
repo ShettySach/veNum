@@ -44,13 +44,11 @@ impl CompiledKernel {
         // ABI: fn(in0: *const f32, in1: *const f32, ..., out: *mut f32, n: u64)
         match self.num_inputs {
             0 => {
-                let f: extern "C" fn(*mut f32, u64) =
-                    std::mem::transmute(self.fn_ptr);
+                let f: extern "C" fn(*mut f32, u64) = std::mem::transmute(self.fn_ptr);
                 f(output, numel as u64);
             }
             1 => {
-                let f: extern "C" fn(*const f32, *mut f32, u64) =
-                    std::mem::transmute(self.fn_ptr);
+                let f: extern "C" fn(*const f32, *mut f32, u64) = std::mem::transmute(self.fn_ptr);
                 f(inputs[0], output, numel as u64);
             }
             2 => {
@@ -63,8 +61,56 @@ impl CompiledKernel {
                     std::mem::transmute(self.fn_ptr);
                 f(inputs[0], inputs[1], inputs[2], output, numel as u64);
             }
+            4 => {
+                let f: extern "C" fn(
+                    *const f32,
+                    *const f32,
+                    *const f32,
+                    *const f32,
+                    *mut f32,
+                    u64,
+                ) = std::mem::transmute(self.fn_ptr);
+                f(
+                    inputs[0], inputs[1], inputs[2], inputs[3], output,
+                    numel as u64,
+                );
+            }
+            5 => {
+                let f: extern "C" fn(
+                    *const f32,
+                    *const f32,
+                    *const f32,
+                    *const f32,
+                    *const f32,
+                    *mut f32,
+                    u64,
+                ) = std::mem::transmute(self.fn_ptr);
+                f(
+                    inputs[0], inputs[1], inputs[2], inputs[3], inputs[4],
+                    output, numel as u64,
+                );
+            }
+            6 => {
+                let f: extern "C" fn(
+                    *const f32,
+                    *const f32,
+                    *const f32,
+                    *const f32,
+                    *const f32,
+                    *const f32,
+                    *mut f32,
+                    u64,
+                ) = std::mem::transmute(self.fn_ptr);
+                f(
+                    inputs[0], inputs[1], inputs[2], inputs[3], inputs[4],
+                    inputs[5], output, numel as u64,
+                );
+            }
             _ => {
-                panic!("CompiledKernel: too many inputs ({}), max 3 supported in dispatch", self.num_inputs);
+                panic!(
+                    "CompiledKernel: too many inputs ({}), max 6 supported in dispatch",
+                    self.num_inputs
+                );
             }
         }
     }
@@ -120,10 +166,8 @@ pub fn compile_kernel(graph: &Graph, kernel: &FusedKernel) -> Result<CompiledKer
     let func_id = module.declare_function("kernel", Linkage::Local, &sig)?;
 
     // --- Build function body ---
-    let mut func = Function::with_name_signature(
-        cranelift_codegen::ir::UserFuncName::user(0, 0),
-        sig.clone(),
-    );
+    let mut func =
+        Function::with_name_signature(cranelift_codegen::ir::UserFuncName::user(0, 0), sig.clone());
 
     let mut func_ctx = FunctionBuilderContext::new();
     let mut builder = FunctionBuilder::new(&mut func, &mut func_ctx);
@@ -238,9 +282,9 @@ fn build_expression(
 
     match &node.op {
         Op::Load => {
-            let idx = input_index.get(&id).ok_or_else(|| {
-                anyhow::anyhow!("Load node {:?} not found in input_index", id)
-            })?;
+            let idx = input_index
+                .get(&id)
+                .ok_or_else(|| anyhow::anyhow!("Load node {:?} not found in input_index", id))?;
             let ptr = input_ptrs[*idx];
             let addr = builder.ins().iadd(ptr, byte_offset);
             Ok(builder.ins().load(types::F32, MemFlags::new(), addr, 0))
@@ -248,10 +292,22 @@ fn build_expression(
         Op::Const(val) => Ok(builder.ins().f32const(*val)),
         Op::Add | Op::Sub | Op::Mul | Op::Div => {
             let lhs = build_expression(
-                graph, node.inputs[0], builder, input_ptrs, input_index, byte_offset, math,
+                graph,
+                node.inputs[0],
+                builder,
+                input_ptrs,
+                input_index,
+                byte_offset,
+                math,
             )?;
             let rhs = build_expression(
-                graph, node.inputs[1], builder, input_ptrs, input_index, byte_offset, math,
+                graph,
+                node.inputs[1],
+                builder,
+                input_ptrs,
+                input_index,
+                byte_offset,
+                math,
             )?;
             Ok(match node.op {
                 Op::Add => builder.ins().fadd(lhs, rhs),
@@ -263,27 +319,51 @@ fn build_expression(
         }
         Op::Neg => {
             let val = build_expression(
-                graph, node.inputs[0], builder, input_ptrs, input_index, byte_offset, math,
+                graph,
+                node.inputs[0],
+                builder,
+                input_ptrs,
+                input_index,
+                byte_offset,
+                math,
             )?;
             Ok(builder.ins().fneg(val))
         }
         Op::Exp => {
             let val = build_expression(
-                graph, node.inputs[0], builder, input_ptrs, input_index, byte_offset, math,
+                graph,
+                node.inputs[0],
+                builder,
+                input_ptrs,
+                input_index,
+                byte_offset,
+                math,
             )?;
             let call = builder.ins().call(math.expf, &[val]);
             Ok(builder.inst_results(call)[0])
         }
         Op::Ln => {
             let val = build_expression(
-                graph, node.inputs[0], builder, input_ptrs, input_index, byte_offset, math,
+                graph,
+                node.inputs[0],
+                builder,
+                input_ptrs,
+                input_index,
+                byte_offset,
+                math,
             )?;
             let call = builder.ins().call(math.logf, &[val]);
             Ok(builder.inst_results(call)[0])
         }
         Op::Sqrt => {
             let val = build_expression(
-                graph, node.inputs[0], builder, input_ptrs, input_index, byte_offset, math,
+                graph,
+                node.inputs[0],
+                builder,
+                input_ptrs,
+                input_index,
+                byte_offset,
+                math,
             )?;
             Ok(builder.ins().sqrt(val))
         }

@@ -1,8 +1,8 @@
-use venum::Tensor;
+use venum::ETensor;
 
 fn main() -> anyhow::Result<()> {
-    let a = Tensor::arange(0, 1_000_000, 1)?.view(&[1000, 1000])?;
-    let b = Tensor::arange(1_000_000, 0, -1)?.view(&[1000, 1000])?;
+    let a = ETensor::arange(0, 1_000_000, 1)?.view(&[1000, 1000])?;
+    let b = ETensor::arange(1_000_000, 0, -1)?.view(&[1000, 1000])?;
 
     for _ in 0..10 {
         let now = std::time::Instant::now();

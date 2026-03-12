@@ -6,11 +6,11 @@ use std::{
 };
 
 use crate::{
-    core::{errors::EmptyTensorError, iters::Indexer, utils::cast_to_usize},
-    Tensor,
+    core::eager::ETensor, core::errors::EmptyTensorError, core::iters::Indexer,
+    core::utils::cast_to_usize,
 };
 
-impl<T> Tensor<T>
+impl<T> ETensor<T>
 where
     T: Copy,
 {
@@ -90,38 +90,38 @@ where
         min.ok_or(EmptyTensorError::ReduceMin.into())
     }
 
-    pub fn sum_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<Tensor<T>>
+    pub fn sum_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<ETensor<T>>
     where
         T: Sum<T>,
     {
-        self.reduce(Tensor::sum, dimensions, keepdims)
+        self.reduce(ETensor::sum, dimensions, keepdims)
     }
 
-    pub fn mean_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<Tensor<T>>
+    pub fn mean_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<ETensor<T>>
     where
         T: Sum<T> + Div<T, Output = T> + FromPrimitive,
     {
-        self.reduce(Tensor::mean, dimensions, keepdims)
+        self.reduce(ETensor::mean, dimensions, keepdims)
     }
 
-    pub fn product_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<Tensor<T>>
+    pub fn product_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<ETensor<T>>
     where
         T: Product<T>,
     {
-        self.reduce(Tensor::product, dimensions, keepdims)
+        self.reduce(ETensor::product, dimensions, keepdims)
     }
 
-    pub fn max_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<Tensor<T>>
+    pub fn max_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<ETensor<T>>
     where
         T: PartialOrd,
     {
-        self.reduce(Tensor::max, dimensions, keepdims)
+        self.reduce(ETensor::max, dimensions, keepdims)
     }
 
-    pub fn min_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<Tensor<T>>
+    pub fn min_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<ETensor<T>>
     where
         T: PartialOrd,
     {
-        self.reduce(Tensor::min, dimensions, keepdims)
+        self.reduce(ETensor::min, dimensions, keepdims)
     }
 }

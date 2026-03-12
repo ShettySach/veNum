@@ -1,11 +1,9 @@
-pub mod delayed_ops;
 mod display;
+pub mod eager;
 mod errors;
 mod iters;
-mod ops;
+pub mod lazy;
 mod shape;
-mod tensor;
 mod tests;
 mod utils;
-pub use ops::conv;
-pub use tensor::Tensor;
+// pub use eager::ETensor; // Re-exported via lib.rs

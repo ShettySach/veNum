@@ -1,13 +1,13 @@
 #[cfg(test)]
 mod core_tests {
-    use crate::Tensor;
+    use crate::core::eager::ETensor;
     use anyhow::Result;
 
     #[test]
     fn same_memory() -> Result<()> {
         use std::sync::Arc;
 
-        let tensor = Tensor::new_1d(&[1, 2, 3, 4, 5, 6, 7, 8, 9])?;
+        let tensor = ETensor::new_1d(&[1, 2, 3, 4, 5, 6, 7, 8, 9])?;
         let view = tensor.view(&[3, 3])?;
         let slice = tensor.slice(&[(3, 7)])?;
 
@@ -23,7 +23,7 @@ mod core_tests {
 
     #[test]
     fn contiguous() -> Result<()> {
-        let a = Tensor::arange(1, 28, 1)?;
+        let a = ETensor::arange(1, 28, 1)?;
         let a = a.reshape(&[3, 3, 3])?;
 
         let flip_0 = a.flip(&[0])?;
@@ -41,7 +41,7 @@ mod core_tests {
 
     #[test]
     fn view() -> Result<()> {
-        let tensor = Tensor::arange(0, 64, 1)?;
+        let tensor = ETensor::arange(0, 64, 1)?;
 
         assert!(tensor.view(&[4, 4, 4]).is_ok());
         assert!(tensor.view(&[8, 8]).is_ok());
@@ -54,8 +54,8 @@ mod core_tests {
 
     #[test]
     fn eye() -> Result<()> {
-        let tensor = Tensor::arange(0, 64, 1)?.view(&[4, 4, 4])?;
-        let eye = Tensor::eye(4)?;
+        let tensor = ETensor::arange(0, 64, 1)?.view(&[4, 4, 4])?;
+        let eye = ETensor::eye(4)?;
         let result = tensor.matmul(&eye)?;
 
         assert_eq!(tensor, result);
@@ -65,7 +65,7 @@ mod core_tests {
 
     #[test]
     fn empty() -> Result<()> {
-        let empty = Tensor::<u8>::new_1d(&[])?;
+        let empty = ETensor::<u8>::new_1d(&[])?;
 
         let max = empty.max();
         let min = empty.min();

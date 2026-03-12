@@ -124,9 +124,6 @@ impl Graph {
 
     /// Count how many nodes reference this node as an input.
     pub fn consumer_count(&self, id: NodeId) -> usize {
-        self.nodes
-            .iter()
-            .filter(|n| n.inputs.contains(&id))
-            .count()
+        self.nodes.iter().filter(|n| n.inputs.contains(&id)).count()
     }
 }

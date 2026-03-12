@@ -60,7 +60,13 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
         // This node is the root of a fused kernel. Collect all input buffers
         // by walking the expression tree (nodes that are inlined into this kernel).
         let mut input_buffers = Vec::new();
-        collect_kernel_inputs(graph, id, &consumer_counts, &mut inlined, &mut input_buffers);
+        collect_kernel_inputs(
+            graph,
+            id,
+            &consumer_counts,
+            &mut inlined,
+            &mut input_buffers,
+        );
 
         schedule.push(ScheduleItem::Fused(FusedKernel {
             root: id,
@@ -116,12 +122,7 @@ fn topo_sort(graph: &Graph, root: NodeId) -> Vec<NodeId> {
     order
 }
 
-fn topo_dfs(
-    graph: &Graph,
-    id: NodeId,
-    visited: &mut HashSet<NodeId>,
-    order: &mut Vec<NodeId>,
-) {
+fn topo_dfs(graph: &Graph, id: NodeId, visited: &mut HashSet<NodeId>, order: &mut Vec<NodeId>) {
     if !visited.insert(id) {
         return;
     }
