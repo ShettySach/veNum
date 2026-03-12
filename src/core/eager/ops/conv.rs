@@ -1,4 +1,4 @@
-use anyhow::{Ok, Result};
+use anyhow::Result;
 use std::{iter::Sum, ops::Mul};
 
 use crate::{core::eager::ETensor, core::iters::Strider, core::shape::Shape};
