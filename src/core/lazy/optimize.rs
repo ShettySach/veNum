@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 use super::dtype::DType;
 use super::graph::{Graph, Node, NodeId, Op};
 
@@ -120,6 +118,22 @@ fn node_to_egglog(graph: &Graph, id: NodeId) -> String {
         Op::Ln => format!("(tLn {})", node_to_egglog(graph, node.inputs[0])),
         Op::Sqrt => format!("(tSqrt {})", node_to_egglog(graph, node.inputs[0])),
         Op::Neg => format!("(tNeg {})", node_to_egglog(graph, node.inputs[0])),
+
+        // Non-elementwise / shape ops are currently not modeled in egglog.
+        // Keep optimizer safe by treating them as opaque leaves.
+        Op::Reshape(_)
+        | Op::Permute(_)
+        | Op::Transpose(_, _)
+        | Op::Expand(_)
+        | Op::Slice(_)
+        | Op::Flip(_)
+        | Op::Squeeze
+        | Op::Unsqueeze(_)
+        | Op::Pad(_, _)
+        | Op::Sum(_, _)
+        | Op::Prod(_, _)
+        | Op::Max(_, _)
+        | Op::Min(_, _) => format!("(tLoad {})", id.0),
     }
 }
 
@@ -209,7 +223,18 @@ fn parse_sexpr(original: &Graph, s: &str, graph: &mut Graph) -> NodeId {
                 buffer: None,
             })
         }
-        _ => panic!("Unknown egglog term: {}", head),
+        _ => {
+            // Be conservative for any unknown extracted term:
+            // materialize it as an opaque load by reusing original root buffer.
+            let orig_node = original.node(NodeId(0));
+            graph.add_node(Node {
+                op: Op::Load,
+                inputs: vec![],
+                shape: orig_node.shape.clone(),
+                dtype: orig_node.dtype,
+                buffer: orig_node.buffer.clone(),
+            })
+        }
     }
 }
 

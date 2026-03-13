@@ -6,11 +6,11 @@ use std::{
 };
 
 use crate::{
-    core::eager::ETensor, core::errors::EmptyTensorError, core::iters::Indexer,
+    core::errors::EmptyTensorError, core::iters::Indexer, core::naive::NaiveTensor,
     core::utils::cast_to_usize,
 };
 
-impl<T> ETensor<T>
+impl<T> NaiveTensor<T>
 where
     T: Copy,
 {
@@ -90,38 +90,38 @@ where
         min.ok_or(EmptyTensorError::ReduceMin.into())
     }
 
-    pub fn sum_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<ETensor<T>>
+    pub fn sum_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<NaiveTensor<T>>
     where
         T: Sum<T>,
     {
-        self.reduce(ETensor::sum, dimensions, keepdims)
+        self.reduce(NaiveTensor::sum, dimensions, keepdims)
     }
 
-    pub fn mean_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<ETensor<T>>
+    pub fn mean_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<NaiveTensor<T>>
     where
         T: Sum<T> + Div<T, Output = T> + FromPrimitive,
     {
-        self.reduce(ETensor::mean, dimensions, keepdims)
+        self.reduce(NaiveTensor::mean, dimensions, keepdims)
     }
 
-    pub fn product_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<ETensor<T>>
+    pub fn product_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<NaiveTensor<T>>
     where
         T: Product<T>,
     {
-        self.reduce(ETensor::product, dimensions, keepdims)
+        self.reduce(NaiveTensor::product, dimensions, keepdims)
     }
 
-    pub fn max_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<ETensor<T>>
+    pub fn max_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<NaiveTensor<T>>
     where
         T: PartialOrd,
     {
-        self.reduce(ETensor::max, dimensions, keepdims)
+        self.reduce(NaiveTensor::max, dimensions, keepdims)
     }
 
-    pub fn min_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<ETensor<T>>
+    pub fn min_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<NaiveTensor<T>>
     where
         T: PartialOrd,
     {
-        self.reduce(ETensor::min, dimensions, keepdims)
+        self.reduce(NaiveTensor::min, dimensions, keepdims)
     }
 }

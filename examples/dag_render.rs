@@ -1,11 +1,12 @@
-use venum::LTensor;
+use venum::{Context, Tensor};
 
 fn main() {
-    let a = LTensor::from_slice(&[2.0, 3.0, 4.0, 5.0], vec![4]);
-    let b = LTensor::from_slice(&[1.0, 1.0, 1.0, 1.0], vec![4]);
+    let cx = Context::new();
 
-    // (a * b + a) - b
-    let c = &(&(&a * &b) + &a) - &b;
+    let a = Tensor::from_slice(&cx, &[2.0, 3.0, 4.0, 5.0], vec![4]);
+    let b = Tensor::from_slice(&cx, &[1.0, 1.0, 1.0, 1.0], vec![4]);
+
+    let c = (&a * &b + &a) - &b;
 
     println!("=== RAW DAG ===");
     println!("{}", c.render_dag());

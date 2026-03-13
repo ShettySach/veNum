@@ -1,7 +1,7 @@
-use venum::ETensor;
+use venum::NaiveTensor;
 
 fn main() -> anyhow::Result<()> {
-    let tensor = ETensor::arange(0, 9, 1)?.view(&[3, 3])?.flip(&[0])?;
+    let tensor = NaiveTensor::arange(0, 9, 1)?.view(&[3, 3])?.flip(&[0])?;
     println!("{}", tensor);
 
     Ok(())

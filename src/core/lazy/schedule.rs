@@ -12,32 +12,55 @@ pub struct FusedKernel {
     pub numel: usize,
 }
 
+/// Shape-op barrier item.
+/// These run as standalone schedule steps (not fused into elementwise kernels yet).
+#[derive(Debug, Clone)]
+pub struct ShapeOpItem {
+    pub root: NodeId,
+    pub op: Op,
+    pub input: NodeId,
+    pub shape: Vec<usize>,
+}
+
+/// Reduce-op barrier item.
+/// Reductions are scheduled separately from elementwise fusion.
+#[derive(Debug, Clone)]
+pub struct ReduceOpItem {
+    pub root: NodeId,
+    pub op: Op,
+    pub input: NodeId,
+    pub shape: Vec<usize>,
+}
+
 /// An item in the execution schedule.
 #[derive(Debug)]
 pub enum ScheduleItem {
     Fused(FusedKernel),
+    Shape(ShapeOpItem),
+    Reduce(ReduceOpItem),
 }
 
 /// Build a linear execution schedule from the graph, rooted at `root`.
 ///
 /// Algorithm:
 /// 1. Topological sort from root (reverse post-order DFS).
-/// 2. Walk in topo order, fusing chains of elementwise ops.
-///    - A node is "fusible into its consumer" if:
-///      a) It is elementwise.
-///      b) It has exactly one consumer (the node being fused into).
-///      c) It has the same numel as the consumer.
-///    - Otherwise it becomes a barrier and must be realized as a separate kernel / buffer.
+/// 2. Walk topo order:
+///    - Leaf nodes (`Load`, `Const`) are skipped.
+///    - Shape ops become `ScheduleItem::Shape` barriers.
+///    - Reduce ops become `ScheduleItem::Reduce` barriers.
+///    - Elementwise ops become `ScheduleItem::Fused`.
+/// 3. Fusing rule for elementwise kernels:
+///    - Input can be inlined iff:
+///      a) input is elementwise
+///      b) input has exactly one consumer
+///      c) input has same `numel` as consumer
 pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
     let topo = topo_sort(graph, root);
-
-    // For each node, how many other nodes consume it?
     let consumer_counts = compute_consumer_counts(graph, &topo);
 
-    // Nodes that are "inlined" into a consumer's kernel and don't need their own output buffer.
+    // Nodes that are inlined into fused elementwise kernels.
     let mut inlined: HashSet<NodeId> = HashSet::new();
 
-    // Walk topo order and decide what gets its own kernel.
     let mut schedule = Vec::new();
 
     for &id in &topo {
@@ -47,32 +70,55 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
 
         let node = graph.node(id);
 
-        // Leaf nodes don't need kernels.
+        // Leaves don't need a schedule item.
         if matches!(node.op, Op::Load | Op::Const(_)) {
             continue;
         }
 
-        // If it's not elementwise (future: reductions, etc.), skip for now.
-        if !node.op.is_elementwise() {
+        // Shape ops are explicit barriers.
+        if node.op.is_shape_op() {
+            let input = node.inputs[0];
+            schedule.push(ScheduleItem::Shape(ShapeOpItem {
+                root: id,
+                op: node.op.clone(),
+                input,
+                shape: node.shape.clone(),
+            }));
             continue;
         }
 
-        // This node is the root of a fused kernel. Collect all input buffers
-        // by walking the expression tree (nodes that are inlined into this kernel).
-        let mut input_buffers = Vec::new();
-        collect_kernel_inputs(
-            graph,
-            id,
-            &consumer_counts,
-            &mut inlined,
-            &mut input_buffers,
-        );
+        // Reduce ops are explicit barriers.
+        if node.op.is_reduce_op() {
+            let input = node.inputs[0];
+            schedule.push(ScheduleItem::Reduce(ReduceOpItem {
+                root: id,
+                op: node.op.clone(),
+                input,
+                shape: node.shape.clone(),
+            }));
+            continue;
+        }
 
-        schedule.push(ScheduleItem::Fused(FusedKernel {
-            root: id,
-            input_buffers,
-            numel: node.numel(),
-        }));
+        // Elementwise ops can be fused.
+        if node.op.is_elementwise() {
+            let mut input_buffers = Vec::new();
+            collect_kernel_inputs(
+                graph,
+                id,
+                &consumer_counts,
+                &mut inlined,
+                &mut input_buffers,
+            );
+
+            schedule.push(ScheduleItem::Fused(FusedKernel {
+                root: id,
+                input_buffers,
+                numel: node.numel(),
+            }));
+            continue;
+        }
+
+        // Future non-elementwise ops (matmul/conv/etc.) are intentionally skipped here.
     }
 
     schedule
@@ -92,7 +138,7 @@ fn collect_kernel_inputs(
     for &input_id in &node.inputs {
         let input_node = graph.node(input_id);
 
-        // Const nodes are always inlined (they emit f32const in JIT, no buffer needed).
+        // Const nodes are always inlined (they emit f32const in JIT).
         if matches!(input_node.op, Op::Const(_)) {
             inlined.insert(input_id);
             continue;
@@ -106,7 +152,7 @@ fn collect_kernel_inputs(
             inlined.insert(input_id);
             collect_kernel_inputs(graph, input_id, consumer_counts, inlined, inputs);
         } else {
-            // This is a barrier — it's a leaf input to our kernel.
+            // This is a barrier leaf input for the fused kernel.
             if !inputs.contains(&input_id) {
                 inputs.push(input_id);
             }

@@ -2,14 +2,15 @@ use anyhow::{bail, Result};
 use std::{cmp::Ordering, iter::Sum, ops::Mul};
 
 use crate::{
-    core::eager::ETensor, core::errors::MatmulShapeError, core::iters::Slicer, core::shape::Shape,
+    core::errors::MatmulShapeError, core::iters::Slicer, core::naive::NaiveTensor,
+    core::shape::Shape,
 };
 
-impl<T> ETensor<T>
+impl<T> NaiveTensor<T>
 where
     T: Copy + Mul<Output = T> + Sum<T> + Default,
 {
-    pub fn matmul_2d(&self, rhs: &ETensor<T>) -> Result<ETensor<T>> {
+    pub fn matmul_2d(&self, rhs: &NaiveTensor<T>) -> Result<NaiveTensor<T>> {
         let (n1, n2) = (self.shape.sizes[1], rhs.shape.sizes[0]);
 
         if n1 != n2 {
@@ -36,10 +37,10 @@ where
             }
         }
 
-        ETensor::init(data, &[m, l])
+        NaiveTensor::init(data, &[m, l])
     }
 
-    pub fn matmul_nd(&self, rhs: &ETensor<T>) -> Result<ETensor<T>> {
+    pub fn matmul_nd(&self, rhs: &NaiveTensor<T>) -> Result<NaiveTensor<T>> {
         let (lhs_rank, rhs_rank) = (self.rank(), rhs.rank());
 
         let (lhs, rhs, max_dims) = match self.rank().cmp(&rhs.rank()) {
@@ -90,10 +91,10 @@ where
             }
         }
 
-        ETensor::init(data, &sizes)
+        NaiveTensor::init(data, &sizes)
     }
 
-    pub fn matmul(&self, rhs: &ETensor<T>) -> Result<ETensor<T>> {
+    pub fn matmul(&self, rhs: &NaiveTensor<T>) -> Result<NaiveTensor<T>> {
         let (lhs_rank, rhs_rank) = (self.rank(), rhs.rank());
 
         if lhs_rank > 2 || rhs_rank > 2 {
@@ -103,7 +104,7 @@ where
         } else if lhs_rank == 2 || rhs_rank == 2 {
             self.matmul_nd(rhs)
         } else if lhs_rank == 1 && rhs_rank == 1 {
-            ETensor::scalar((self * rhs)?.sum()?)
+            NaiveTensor::scalar((self * rhs)?.sum()?)
         } else {
             Err(MatmulShapeError::Matmul0d.into())
         }

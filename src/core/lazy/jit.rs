@@ -30,10 +30,6 @@ extern "C" fn jit_expf(x: f32) -> f32 {
 extern "C" fn jit_logf(x: f32) -> f32 {
     x.ln()
 }
-extern "C" fn jit_sqrtf(x: f32) -> f32 {
-    x.sqrt()
-}
-
 impl CompiledKernel {
     /// Execute the kernel with the given input buffer pointers and output pointer.
     ///
@@ -71,7 +67,11 @@ impl CompiledKernel {
                     u64,
                 ) = std::mem::transmute(self.fn_ptr);
                 f(
-                    inputs[0], inputs[1], inputs[2], inputs[3], output,
+                    inputs[0],
+                    inputs[1],
+                    inputs[2],
+                    inputs[3],
+                    output,
                     numel as u64,
                 );
             }
@@ -86,8 +86,13 @@ impl CompiledKernel {
                     u64,
                 ) = std::mem::transmute(self.fn_ptr);
                 f(
-                    inputs[0], inputs[1], inputs[2], inputs[3], inputs[4],
-                    output, numel as u64,
+                    inputs[0],
+                    inputs[1],
+                    inputs[2],
+                    inputs[3],
+                    inputs[4],
+                    output,
+                    numel as u64,
                 );
             }
             6 => {
@@ -102,8 +107,14 @@ impl CompiledKernel {
                     u64,
                 ) = std::mem::transmute(self.fn_ptr);
                 f(
-                    inputs[0], inputs[1], inputs[2], inputs[3], inputs[4],
-                    inputs[5], output, numel as u64,
+                    inputs[0],
+                    inputs[1],
+                    inputs[2],
+                    inputs[3],
+                    inputs[4],
+                    inputs[5],
+                    output,
+                    numel as u64,
                 );
             }
             _ => {
@@ -140,8 +151,6 @@ pub fn compile_kernel(graph: &Graph, kernel: &FusedKernel) -> Result<CompiledKer
     // Register math symbols.
     builder.symbol("jit_expf", jit_expf as *const u8);
     builder.symbol("jit_logf", jit_logf as *const u8);
-    builder.symbol("jit_sqrtf", jit_sqrtf as *const u8);
-
     let mut module = JITModule::new(builder);
     let ptr_type = module.target_config().pointer_type();
 
@@ -152,7 +161,6 @@ pub fn compile_kernel(graph: &Graph, kernel: &FusedKernel) -> Result<CompiledKer
 
     let expf_id = module.declare_function("jit_expf", Linkage::Import, &math_sig)?;
     let logf_id = module.declare_function("jit_logf", Linkage::Import, &math_sig)?;
-    let sqrtf_id = module.declare_function("jit_sqrtf", Linkage::Import, &math_sig)?;
 
     // --- Build kernel function signature ---
     // fn(in0: *f32, in1: *f32, ..., out: *mut f32, n: u64)
@@ -175,7 +183,6 @@ pub fn compile_kernel(graph: &Graph, kernel: &FusedKernel) -> Result<CompiledKer
     // Declare references to math functions.
     let expf_ref = module.declare_func_in_func(expf_id, builder.func);
     let logf_ref = module.declare_func_in_func(logf_id, builder.func);
-    let sqrtf_ref = module.declare_func_in_func(sqrtf_id, builder.func);
 
     let entry_block = builder.create_block();
     builder.append_block_params_for_function_params(entry_block);
@@ -216,7 +223,6 @@ pub fn compile_kernel(graph: &Graph, kernel: &FusedKernel) -> Result<CompiledKer
     let math_refs = MathFuncRefs {
         expf: expf_ref,
         logf: logf_ref,
-        sqrtf: sqrtf_ref,
     };
 
     let result = build_expression(
@@ -265,7 +271,6 @@ pub fn compile_kernel(graph: &Graph, kernel: &FusedKernel) -> Result<CompiledKer
 struct MathFuncRefs {
     expf: cranelift_codegen::ir::FuncRef,
     logf: cranelift_codegen::ir::FuncRef,
-    sqrtf: cranelift_codegen::ir::FuncRef,
 }
 
 /// Recursively build the Cranelift IR for the expression tree rooted at `id`.
@@ -281,6 +286,14 @@ fn build_expression(
     let node = graph.node(id);
 
     match &node.op {
+        op if !op.is_elementwise() && !matches!(op, Op::Const(_)) => {
+            let idx = input_index
+                .get(&id)
+                .ok_or_else(|| anyhow::anyhow!("Barrier node {:?} not found in input_index", id))?;
+            let ptr = input_ptrs[*idx];
+            let addr = builder.ins().iadd(ptr, byte_offset);
+            Ok(builder.ins().load(types::F32, MemFlags::new(), addr, 0))
+        }
         Op::Load => {
             let idx = input_index
                 .get(&id)
@@ -367,5 +380,10 @@ fn build_expression(
             )?;
             Ok(builder.ins().sqrt(val))
         }
+        _ => Err(anyhow::anyhow!(
+            "Unsupported op in JIT expression builder for node {:?}: {:?}",
+            id,
+            node.op
+        )),
     }
 }

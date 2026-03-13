@@ -9,20 +9,20 @@ use crate::core::{
     utils::cast_to_usize,
 };
 
-pub struct ETensor<T> {
+pub struct NaiveTensor<T> {
     pub(crate) data: Arc<Vec<T>>,
     pub(crate) shape: Shape,
 }
 
-impl<T: Copy> ETensor<T> {
-    pub(crate) fn init(data: Vec<T>, sizes: &[usize]) -> Result<ETensor<T>> {
-        Ok(ETensor {
+impl<T: Copy> NaiveTensor<T> {
+    pub(crate) fn init(data: Vec<T>, sizes: &[usize]) -> Result<NaiveTensor<T>> {
+        Ok(NaiveTensor {
             data: Arc::new(data),
             shape: Shape::new(sizes),
         })
     }
 
-    pub fn new(data: &[T], sizes: &[usize]) -> Result<ETensor<T>> {
+    pub fn new(data: &[T], sizes: &[usize]) -> Result<NaiveTensor<T>> {
         let data_size = data.len();
         let tensor_size = sizes.iter().product();
 
@@ -33,39 +33,39 @@ impl<T: Copy> ETensor<T> {
             });
         }
 
-        ETensor::init(data.to_vec(), sizes)
+        NaiveTensor::init(data.to_vec(), sizes)
     }
 
-    pub fn new_1d(data: &[T]) -> Result<ETensor<T>> {
-        ETensor::init(data.to_vec(), &[data.len()])
+    pub fn new_1d(data: &[T]) -> Result<NaiveTensor<T>> {
+        NaiveTensor::init(data.to_vec(), &[data.len()])
     }
 
-    pub fn scalar(data: T) -> Result<ETensor<T>> {
-        Ok(ETensor {
+    pub fn scalar(data: T) -> Result<NaiveTensor<T>> {
+        Ok(NaiveTensor {
             data: Arc::new(vec![data]),
             shape: Shape::scalar(),
         })
     }
 
-    pub fn same(element: T, size: usize) -> Result<ETensor<T>> {
-        ETensor::init(vec![element; size], &[size])
+    pub fn same(element: T, size: usize) -> Result<NaiveTensor<T>> {
+        NaiveTensor::init(vec![element; size], &[size])
     }
 
-    pub fn zeroes(size: usize) -> Result<ETensor<T>>
+    pub fn zeroes(size: usize) -> Result<NaiveTensor<T>>
     where
         T: Zero,
     {
-        ETensor::same(T::zero(), size)
+        NaiveTensor::same(T::zero(), size)
     }
 
-    pub fn ones(size: usize) -> Result<ETensor<T>>
+    pub fn ones(size: usize) -> Result<NaiveTensor<T>>
     where
         T: One,
     {
-        ETensor::same(T::one(), size)
+        NaiveTensor::same(T::one(), size)
     }
 
-    pub fn eye(size: usize) -> Result<ETensor<T>>
+    pub fn eye(size: usize) -> Result<NaiveTensor<T>>
     where
         T: Zero + One,
     {
@@ -80,10 +80,10 @@ impl<T: Copy> ETensor<T> {
             })
             .collect();
 
-        ETensor::init(data, &[size, size])
+        NaiveTensor::init(data, &[size, size])
     }
 
-    pub fn arange(start: T, end: T, step: T) -> Result<ETensor<T>>
+    pub fn arange(start: T, end: T, step: T) -> Result<NaiveTensor<T>>
     where
         T: Add<Output = T> + PartialOrd + Zero,
     {
@@ -105,10 +105,10 @@ impl<T: Copy> ETensor<T> {
         })
         .collect();
 
-        ETensor::new_1d(&data)
+        NaiveTensor::new_1d(&data)
     }
 
-    pub fn linspace(start: T, end: T, num: usize) -> Result<ETensor<T>>
+    pub fn linspace(start: T, end: T, num: usize) -> Result<NaiveTensor<T>>
     where
         T: NumOps + FromPrimitive + Debug,
     {
@@ -119,19 +119,19 @@ impl<T: Copy> ETensor<T> {
             .take(num)
             .collect();
 
-        ETensor::init(data, &[num])
+        NaiveTensor::init(data, &[num])
     }
 
     // --- Data ---
 
-    pub fn to_contiguous(&self) -> Result<ETensor<T>> {
-        Ok(ETensor {
+    pub fn to_contiguous(&self) -> Result<NaiveTensor<T>> {
+        Ok(NaiveTensor {
             data: Arc::new(self.data_non_contiguous()),
             shape: Shape::new(&self.shape.sizes),
         })
     }
 
-    pub(crate) fn into_contiguous(self) -> Result<ETensor<T>> {
+    pub(crate) fn into_contiguous(self) -> Result<NaiveTensor<T>> {
         if self.is_contiguous() {
             Ok(self)
         } else {
@@ -190,24 +190,24 @@ impl<T: Copy> ETensor<T> {
 
     // --- New Data, New Shape ---
 
-    pub fn reshape(&self, sizes: &[usize]) -> Result<ETensor<T>> {
+    pub fn reshape(&self, sizes: &[usize]) -> Result<NaiveTensor<T>> {
         self.shape.valid_reshape(sizes)?;
 
-        ETensor::init(self.data_non_contiguous(), sizes)
+        NaiveTensor::init(self.data_non_contiguous(), sizes)
     }
 
-    pub fn flatten(&self) -> Result<ETensor<T>> {
+    pub fn flatten(&self) -> Result<NaiveTensor<T>> {
         self.reshape(&[self.numel()])
     }
 
-    pub fn view_else_reshape(&self, sizes: &[usize]) -> Result<ETensor<T>> {
+    pub fn view_else_reshape(&self, sizes: &[usize]) -> Result<NaiveTensor<T>> {
         self.view(sizes).or_else(|_| self.reshape(sizes))
     }
 
-    pub fn pad(&self, constant: T, padding: &[(usize, usize)]) -> Result<ETensor<T>> {
+    pub fn pad(&self, constant: T, padding: &[(usize, usize)]) -> Result<NaiveTensor<T>> {
         let shape = self.shape.pad(padding)?;
         let data = Arc::new(vec![constant; shape.numel()]);
-        let tensor = ETensor { data, shape };
+        let tensor = NaiveTensor { data, shape };
 
         let ranges = padding
             .iter()
@@ -223,10 +223,10 @@ impl<T: Copy> ETensor<T> {
         constant: T,
         padding: &[(usize, usize)],
         dimensions: &[usize],
-    ) -> Result<ETensor<T>> {
+    ) -> Result<NaiveTensor<T>> {
         let shape = self.shape.pad_dims(padding, dimensions)?;
         let data = Arc::new(vec![constant; shape.numel()]);
-        let tensor = ETensor { data, shape };
+        let tensor = NaiveTensor { data, shape };
 
         let ranges = dimensions
             .iter()
@@ -239,7 +239,7 @@ impl<T: Copy> ETensor<T> {
 
     // --- Maps, Zips and Reduce ---
 
-    pub fn unary_map<R>(&self, f: impl Fn(T) -> R) -> Result<ETensor<R>> {
+    pub fn unary_map<R>(&self, f: impl Fn(T) -> R) -> Result<NaiveTensor<R>> {
         let contiguous = self.is_contiguous();
 
         let data = if contiguous {
@@ -263,13 +263,13 @@ impl<T: Copy> ETensor<T> {
             Shape::new(self.sizes())
         };
 
-        Ok(ETensor {
+        Ok(NaiveTensor {
             data: Arc::new(data),
             shape,
         })
     }
 
-    pub fn binary_map<R>(&self, rhs: T, f: impl Fn(T, T) -> R) -> Result<ETensor<R>> {
+    pub fn binary_map<R>(&self, rhs: T, f: impl Fn(T, T) -> R) -> Result<NaiveTensor<R>> {
         let contiguous = self.is_contiguous();
 
         let data = if contiguous {
@@ -296,13 +296,13 @@ impl<T: Copy> ETensor<T> {
             Shape::new(self.sizes())
         };
 
-        Ok(ETensor {
+        Ok(NaiveTensor {
             data: Arc::new(data),
             shape,
         })
     }
 
-    pub fn zip<R>(&self, rhs: &ETensor<T>, f: impl Fn(T, T) -> R) -> Result<ETensor<R>> {
+    pub fn zip<R>(&self, rhs: &NaiveTensor<T>, f: impl Fn(T, T) -> R) -> Result<NaiveTensor<R>> {
         if self.shape == rhs.shape {
             self.equal_zip(rhs, f)
         } else {
@@ -310,7 +310,7 @@ impl<T: Copy> ETensor<T> {
         }
     }
 
-    fn equal_zip<R>(&self, rhs: &ETensor<T>, f: impl Fn(T, T) -> R) -> Result<ETensor<R>> {
+    fn equal_zip<R>(&self, rhs: &NaiveTensor<T>, f: impl Fn(T, T) -> R) -> Result<NaiveTensor<R>> {
         let contiguous = self.is_contiguous() && rhs.is_contiguous();
 
         let data = if contiguous {
@@ -340,13 +340,17 @@ impl<T: Copy> ETensor<T> {
             Shape::new(self.sizes())
         };
 
-        Ok(ETensor {
+        Ok(NaiveTensor {
             data: Arc::new(data),
             shape,
         })
     }
 
-    fn broadcast_zip<R>(&self, rhs: &ETensor<T>, f: impl Fn(T, T) -> R) -> Result<ETensor<R>> {
+    fn broadcast_zip<R>(
+        &self,
+        rhs: &NaiveTensor<T>,
+        f: impl Fn(T, T) -> R,
+    ) -> Result<NaiveTensor<R>> {
         let sizes = Shape::broadcast(&self.shape.sizes, &rhs.shape.sizes)?;
         let shape = Shape::new(&sizes);
         let expansion = sizes.len();
@@ -373,10 +377,10 @@ impl<T: Copy> ETensor<T> {
                 .collect(),
         );
 
-        Ok(ETensor { data, shape })
+        Ok(NaiveTensor { data, shape })
     }
 
-    pub fn zip_array<R>(&self, rhs: &[T], f: impl Fn(T, T) -> R) -> Result<ETensor<R>> {
+    pub fn zip_array<R>(&self, rhs: &[T], f: impl Fn(T, T) -> R) -> Result<NaiveTensor<R>> {
         self.shape.valid_data_size(rhs.len())?;
 
         let data = Indexer::new(&self.shape.sizes)
@@ -389,7 +393,7 @@ impl<T: Copy> ETensor<T> {
             })
             .collect::<Result<Vec<R>>>()?;
 
-        Ok(ETensor {
+        Ok(NaiveTensor {
             data: Arc::new(data),
             shape: self.shape.clone(),
         })
@@ -397,10 +401,10 @@ impl<T: Copy> ETensor<T> {
 
     pub fn reduce<R>(
         &self,
-        f: impl Fn(&ETensor<T>) -> Result<R>,
+        f: impl Fn(&NaiveTensor<T>) -> Result<R>,
         dimensions: &[usize],
         keepdims: bool,
-    ) -> Result<ETensor<R>>
+    ) -> Result<NaiveTensor<R>>
     where
         R: Copy,
     {
@@ -424,15 +428,15 @@ impl<T: Copy> ETensor<T> {
             })
             .collect();
 
-        ETensor::init(data, &sizes)
+        NaiveTensor::init(data, &sizes)
     }
 
-    pub fn index_map(&self, f: impl Fn(T) -> T, index: &[usize]) -> Result<ETensor<T>> {
+    pub fn index_map(&self, f: impl Fn(T) -> T, index: &[usize]) -> Result<NaiveTensor<T>> {
         let mut data = self.data().to_vec();
         let offset = self.shape.index(index)?;
         data[offset] = f(data[offset]);
 
-        Ok(ETensor {
+        Ok(NaiveTensor {
             data: Arc::new(data),
             shape: self.shape.clone(),
         })
@@ -443,18 +447,22 @@ impl<T: Copy> ETensor<T> {
         f: impl Fn(T) -> T,
         index: &[usize],
         dimensions: &[usize],
-    ) -> Result<ETensor<T>> {
+    ) -> Result<NaiveTensor<T>> {
         let mut data = self.data().to_vec();
         let offset = self.shape.index_dims(index, dimensions)?;
         data[offset] = f(data[offset]);
 
-        Ok(ETensor {
+        Ok(NaiveTensor {
             data: Arc::new(data),
             shape: self.shape.clone(),
         })
     }
 
-    pub fn slice_map(&self, f: impl Fn(T) -> T, ranges: &[(usize, usize)]) -> Result<ETensor<T>> {
+    pub fn slice_map(
+        &self,
+        f: impl Fn(T) -> T,
+        ranges: &[(usize, usize)],
+    ) -> Result<NaiveTensor<T>> {
         let slice_shape = self.shape.slice(ranges)?;
 
         let mut data = self.data().to_vec();
@@ -463,7 +471,7 @@ impl<T: Copy> ETensor<T> {
             data[offset] = f(data[offset]);
         }
 
-        Ok(ETensor {
+        Ok(NaiveTensor {
             data: Arc::new(data),
             shape: self.shape.clone(),
         })
@@ -474,7 +482,7 @@ impl<T: Copy> ETensor<T> {
         f: impl Fn(T) -> T,
         ranges: &[(usize, usize)],
         dimensions: &[usize],
-    ) -> Result<ETensor<T>> {
+    ) -> Result<NaiveTensor<T>> {
         let mut data = self.data().to_vec();
         let slice_shape = self.shape.slice_dims(ranges, dimensions)?;
 
@@ -483,7 +491,7 @@ impl<T: Copy> ETensor<T> {
             data[offset] = f(data[offset]);
         }
 
-        Ok(ETensor {
+        Ok(NaiveTensor {
             data: Arc::new(data),
             shape: self.shape.clone(),
         })
@@ -494,7 +502,7 @@ impl<T: Copy> ETensor<T> {
         rhs: &[T],
         f: impl Fn(T, T) -> T,
         ranges: &[(usize, usize)],
-    ) -> Result<ETensor<T>> {
+    ) -> Result<NaiveTensor<T>> {
         let slice_shape = self.shape.slice(ranges)?;
         slice_shape.valid_data_size(rhs.len())?;
 
@@ -504,7 +512,7 @@ impl<T: Copy> ETensor<T> {
             data[offset] = f(data[offset], rhs_value);
         }
 
-        Ok(ETensor {
+        Ok(NaiveTensor {
             data: Arc::new(data),
             shape: self.shape.clone(),
         })
@@ -516,7 +524,7 @@ impl<T: Copy> ETensor<T> {
         f: impl Fn(T, T) -> T,
         ranges: &[(usize, usize)],
         dimensions: &[usize],
-    ) -> Result<ETensor<T>> {
+    ) -> Result<NaiveTensor<T>> {
         let slice_shape = self.shape.slice_dims(ranges, dimensions)?;
         slice_shape.valid_data_size(rhs.len())?;
 
@@ -526,60 +534,60 @@ impl<T: Copy> ETensor<T> {
             data[offset] = f(data[offset], rhs_value);
         }
 
-        Ok(ETensor {
+        Ok(NaiveTensor {
             data: Arc::new(data),
             shape: self.shape.clone(),
         })
     }
 }
 
-impl<T> ETensor<T> {
+impl<T> NaiveTensor<T> {
     // --- Same Data, Different Shape ---
 
-    pub(crate) fn with_shape(&self, shape: Shape) -> Result<ETensor<T>> {
-        Ok(ETensor {
+    pub(crate) fn with_shape(&self, shape: Shape) -> Result<NaiveTensor<T>> {
+        Ok(NaiveTensor {
             data: Arc::clone(&self.data),
             shape,
         })
     }
 
-    pub fn view(&self, sizes: &[usize]) -> Result<ETensor<T>> {
+    pub fn view(&self, sizes: &[usize]) -> Result<NaiveTensor<T>> {
         self.with_shape(self.shape.view(sizes)?)
     }
 
-    pub fn ravel(&self) -> Result<ETensor<T>> {
+    pub fn ravel(&self) -> Result<NaiveTensor<T>> {
         self.view(&[self.numel()])
     }
 
-    pub fn squeeze(&self) -> Result<ETensor<T>> {
+    pub fn squeeze(&self) -> Result<NaiveTensor<T>> {
         self.with_shape(self.shape.squeeze()?)
     }
 
-    pub fn unsqueeze(&self, unsqueezed: usize) -> Result<ETensor<T>> {
+    pub fn unsqueeze(&self, unsqueezed: usize) -> Result<NaiveTensor<T>> {
         self.with_shape(self.shape.unsqueeze(unsqueezed)?)
     }
 
-    pub fn permute(&self, permutation: &[usize]) -> Result<ETensor<T>> {
+    pub fn permute(&self, permutation: &[usize]) -> Result<NaiveTensor<T>> {
         self.with_shape(self.shape.permute(permutation)?)
     }
 
-    pub fn transpose(&self, dim_1: usize, dim_2: usize) -> Result<ETensor<T>> {
+    pub fn transpose(&self, dim_1: usize, dim_2: usize) -> Result<NaiveTensor<T>> {
         self.with_shape(self.shape.transpose(dim_1, dim_2)?)
     }
 
-    pub fn expand(&self, expansions: &[usize]) -> Result<ETensor<T>> {
+    pub fn expand(&self, expansions: &[usize]) -> Result<NaiveTensor<T>> {
         self.with_shape(self.shape.expand(expansions)?)
     }
 
-    pub fn flip(&self, flips: &[usize]) -> Result<ETensor<T>> {
+    pub fn flip(&self, flips: &[usize]) -> Result<NaiveTensor<T>> {
         self.with_shape(self.shape.flip(flips)?)
     }
 
-    pub fn flip_all(&self) -> Result<ETensor<T>> {
+    pub fn flip_all(&self) -> Result<NaiveTensor<T>> {
         self.with_shape(self.shape.flip_all()?)
     }
 
-    pub fn slice(&self, ranges: &[(usize, usize)]) -> Result<ETensor<T>> {
+    pub fn slice(&self, ranges: &[(usize, usize)]) -> Result<NaiveTensor<T>> {
         self.with_shape(self.shape.slice(ranges)?)
     }
 
@@ -587,11 +595,11 @@ impl<T> ETensor<T> {
         &self,
         ranges: &[(usize, usize)],
         dimensions: &[usize],
-    ) -> Result<ETensor<T>> {
+    ) -> Result<NaiveTensor<T>> {
         self.with_shape(self.shape.slice_dims(ranges, dimensions)?)
     }
 
-    pub(crate) fn slicer(&self, indices: &[Option<usize>]) -> Result<ETensor<T>> {
+    pub(crate) fn slicer(&self, indices: &[Option<usize>]) -> Result<NaiveTensor<T>> {
         self.with_shape(self.shape.slicer(indices)?)
     }
 
@@ -622,8 +630,8 @@ impl<T> ETensor<T> {
     }
 }
 
-impl<T: Copy + PartialEq> PartialEq for ETensor<T> {
-    fn eq(&self, rhs: &ETensor<T>) -> bool {
+impl<T: Copy + PartialEq> PartialEq for NaiveTensor<T> {
+    fn eq(&self, rhs: &NaiveTensor<T>) -> bool {
         self.data == rhs.data && self.shape == rhs.shape
     }
 }

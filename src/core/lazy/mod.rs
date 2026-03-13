@@ -1,3 +1,4 @@
+mod context;
 mod dtype;
 mod graph;
 mod jit;
@@ -7,4 +8,5 @@ mod schedule;
 mod tensor;
 mod tests;
 
-pub use tensor::LTensor;
+pub use context::Context;
+pub use tensor::{RealizedTensor, Tensor};

@@ -2,7 +2,6 @@ use anyhow::{bail, Result};
 use std::{
     cmp::{max, Ordering},
     collections::HashSet,
-    iter::repeat,
 };
 
 use crate::core::errors::*;
@@ -188,7 +187,7 @@ impl Shape {
             Ordering::Greater => {
                 let ones_len = new_rank - current;
                 let mut sizes = self.sizes.to_vec();
-                sizes.splice(..0, repeat(1).take(ones_len));
+                sizes.splice(..0, std::iter::repeat_n(1, ones_len));
 
                 Ok(Shape::new(&sizes))
             }

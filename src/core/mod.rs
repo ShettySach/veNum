@@ -1,9 +1,8 @@
 mod display;
-pub mod eager;
 mod errors;
 mod iters;
 pub mod lazy;
+pub mod naive;
 mod shape;
 mod tests;
 mod utils;
-// pub use eager::ETensor; // Re-exported via lib.rs

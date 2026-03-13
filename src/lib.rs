@@ -11,6 +11,7 @@ Vectorized _N_-dimensional numerical arrays.
 */
 
 mod core;
-pub use core::eager::ops::conv;
-pub use core::eager::ETensor;
-pub use core::lazy::LTensor;
+
+pub use core::lazy::{Context, RealizedTensor, Tensor};
+pub use core::naive::ops::conv;
+pub use core::naive::NaiveTensor;
