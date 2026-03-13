@@ -5,6 +5,7 @@ use std::{cmp::Ordering, sync::Arc};
 use crate::core::{
     errors::{ExpansionError, ReshapeError, TransposeError, UnsqueezeError},
     iters::Indexer,
+    naive::NaiveTensor,
 };
 
 use super::{
@@ -14,30 +15,6 @@ use super::{
     optimize, render,
     schedule::{build_schedule, ScheduleItem},
 };
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct RealizedTensor {
-    data: Vec<f32>,
-    shape: Vec<usize>,
-}
-
-impl RealizedTensor {
-    pub fn new(data: Vec<f32>, shape: Vec<usize>) -> Self {
-        Self { data, shape }
-    }
-
-    pub fn data(&self) -> &[f32] {
-        &self.data
-    }
-
-    pub fn shape(&self) -> &[usize] {
-        &self.shape
-    }
-
-    pub fn numel(&self) -> usize {
-        self.shape.iter().product()
-    }
-}
 
 #[derive(Clone)]
 pub struct Tensor {
@@ -67,6 +44,33 @@ impl Tensor {
         };
 
         Self { graph, id, shape }
+    }
+
+    pub fn arange(cx: &Context, start: f32, end: f32, step: f32) -> anyhow::Result<Self> {
+        use std::cmp::Ordering;
+
+        // Validate parameters (same logic as NaiveTensor)
+        let ascending = match step
+            .partial_cmp(&0.0)
+            .ok_or(anyhow::anyhow!("Cannot compare step value"))?
+        {
+            Ordering::Greater if end > start => Ok(true),
+            Ordering::Less if start > end => Ok(false),
+            Ordering::Greater => Err(anyhow::anyhow!("step is positive but end <= start")),
+            Ordering::Less => Err(anyhow::anyhow!("step is negative but start <= end")),
+            Ordering::Equal => Err(anyhow::anyhow!("step cannot be zero")),
+        }?;
+
+        // Generate the data
+        let mut data = Vec::new();
+        let mut curr = start;
+        while (ascending && curr < end) || (!ascending && curr > end) {
+            data.push(curr);
+            curr += step;
+        }
+
+        let shape = vec![data.len()];
+        Ok(Self::from_slice(cx, &data, shape))
     }
 
     pub fn shape(&self) -> &[usize] {
@@ -510,16 +514,16 @@ impl Tensor {
 
     // -------- realize --------
 
-    pub fn realize(&self) -> Result<RealizedTensor> {
+    pub fn realize(&self) -> Result<NaiveTensor<f32>> {
         let graph = self.graph.lock().unwrap();
 
         // Fast path: already-backed leaf.
         let root_node = graph.node(self.id);
         if let Some(ref buffer) = root_node.buffer {
-            let data = buffer.as_f32().to_vec();
+            let data = buffer.as_f32();
             let shape = root_node.shape.clone();
-            drop(graph);
-            return Ok(RealizedTensor::new(data, shape));
+            // drop(graph);
+            return Ok(NaiveTensor::new(&data, &shape)?);
         }
 
         // Only optimize pure elementwise roots for now.
@@ -536,14 +540,11 @@ impl Tensor {
 
         let root_node = graph.node(root);
         if let Some(ref buffer) = root_node.buffer {
-            return Ok(RealizedTensor::new(
-                buffer.as_f32().to_vec(),
-                root_node.shape.clone(),
-            ));
+            return NaiveTensor::new(buffer.as_f32(), &root_node.shape);
         }
         if let Op::Const(val) = root_node.op {
             let numel: usize = self.shape.iter().product();
-            return Ok(RealizedTensor::new(vec![val; numel], self.shape.clone()));
+            return NaiveTensor::new(&vec![val; numel], &self.shape);
         }
 
         let schedule = build_schedule(graph, root);
@@ -623,7 +624,7 @@ impl Tensor {
             .remove(&root)
             .ok_or_else(|| anyhow!("Root node was not realized"))?;
 
-        Ok(RealizedTensor::new(data, graph.node(root).shape.clone()))
+        NaiveTensor::new(&data, &graph.node(root).shape)
     }
 }
 

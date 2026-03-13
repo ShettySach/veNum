@@ -81,10 +81,7 @@ across shape+compute boundaries (e.g., reshape-of-reshape elimination).
 
 ## Phase 5 — Add Matmul and Conv to the Graph
 
-- [ ] `Op::Matmul`
-- [ ] `Op::Conv { strides, padding }`
-- [ ] These get their own `ScheduleItem` variants and codegen paths.
-- [ ] Migrate examples (`matmul.rs`, `conv.rs`, `kernels.rs`) to use `Tensor`.
+- ./FUSION.md
 
 ---
 

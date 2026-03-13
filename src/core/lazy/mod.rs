@@ -9,4 +9,4 @@ mod tensor;
 mod tests;
 
 pub use context::Context;
-pub use tensor::{RealizedTensor, Tensor};
+pub use tensor::Tensor;
