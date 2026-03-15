@@ -15,8 +15,8 @@ mod lazy_tests {
         let dt = Tensor::from_slice(&cx, &data, vec![4]);
         let result = dt.realize()?;
 
-        assert_eq!(result.data(), &data);
-        assert_eq!(result.shape(), &[4]);
+        assert_eq!(*result.data(), *data);
+        assert_eq!(result.sizes(), &[4]);
         Ok(())
     }
 
@@ -29,7 +29,7 @@ mod lazy_tests {
         let c = &a + &b;
         let result = c.realize()?;
 
-        assert_eq!(result.data(), &[11.0, 22.0, 33.0, 44.0]);
+        assert_eq!(*result.data(), [11.0, 22.0, 33.0, 44.0]);
         Ok(())
     }
 
@@ -42,7 +42,7 @@ mod lazy_tests {
         let c = &a * &b;
         let result = c.realize()?;
 
-        assert_eq!(result.data(), &[20.0, 30.0, 40.0, 50.0]);
+        assert_eq!(*result.data(), [20.0, 30.0, 40.0, 50.0]);
         Ok(())
     }
 
@@ -54,10 +54,10 @@ mod lazy_tests {
         let b = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![4]);
 
         let sub_result = (&a - &b).realize()?;
-        assert_eq!(sub_result.data(), &[9.0, 18.0, 27.0, 36.0]);
+        assert_eq!(*sub_result.data(), [9.0, 18.0, 27.0, 36.0]);
 
         let div_result = (&a / &b).realize()?;
-        assert_eq!(div_result.data(), &[10.0, 10.0, 10.0, 10.0]);
+        assert_eq!(*div_result.data(), [10.0, 10.0, 10.0, 10.0]);
 
         Ok(())
     }
@@ -73,7 +73,7 @@ mod lazy_tests {
         let result = c.realize()?;
 
         // (1+10)*1=11, (2+20)*2=44, (3+30)*3=99, (4+40)*4=176
-        assert_eq!(result.data(), &[11.0, 44.0, 99.0, 176.0]);
+        assert_eq!(*result.data(), [11.0, 44.0, 99.0, 176.0]);
         Ok(())
     }
 
@@ -84,7 +84,7 @@ mod lazy_tests {
         let a = Tensor::from_slice(&cx, &[1.0, -2.0, 3.0, -4.0], vec![4]);
         let result = a.neg().realize()?;
 
-        assert_eq!(result.data(), &[-1.0, 2.0, -3.0, 4.0]);
+        assert_eq!(*result.data(), [-1.0, 2.0, -3.0, 4.0]);
         Ok(())
     }
 
@@ -96,7 +96,7 @@ mod lazy_tests {
         let result = a.exp().realize()?;
 
         let expected: Vec<f32> = [0.0f32, 1.0, 2.0].iter().map(|x| x.exp()).collect();
-        assert!(approx_eq(result.data(), &expected, 1e-5));
+        assert!(approx_eq(&result.data(), &expected, 1e-5));
         Ok(())
     }
 
@@ -111,7 +111,7 @@ mod lazy_tests {
             .iter()
             .map(|x| x.ln())
             .collect();
-        assert!(approx_eq(result.data(), &expected, 1e-4));
+        assert!(approx_eq(&result.data(), &expected, 1e-4));
         Ok(())
     }
 
@@ -122,7 +122,7 @@ mod lazy_tests {
         let a = Tensor::from_slice(&cx, &[1.0, 4.0, 9.0, 16.0], vec![4]);
         let result = a.sqrt().realize()?;
 
-        assert_eq!(result.data(), &[1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(*result.data(), [1.0, 2.0, 3.0, 4.0]);
         Ok(())
     }
 
@@ -137,7 +137,7 @@ mod lazy_tests {
         let result = c.realize()?;
 
         // exp(0) + 1 = 2, exp(0) + 2 = 3, exp(0) + 3 = 4
-        assert_eq!(result.data(), &[2.0, 3.0, 4.0]);
+        assert_eq!(*result.data(), [2.0, 3.0, 4.0]);
         Ok(())
     }
 
@@ -150,8 +150,8 @@ mod lazy_tests {
         let c = &a + &b;
         let result = c.realize()?;
 
-        assert_eq!(result.data(), &[11.0, 22.0, 33.0, 44.0]);
-        assert_eq!(result.shape(), &[2, 2]);
+        assert_eq!(*result.data(), [11.0, 22.0, 33.0, 44.0]);
+        assert_eq!(result.sizes(), &[2, 2]);
         Ok(())
     }
 
@@ -169,7 +169,7 @@ mod lazy_tests {
         let result = c.realize()?;
 
         let expected: Vec<f32> = (0..n).map(|_| n as f32).collect();
-        assert_eq!(result.data(), expected.as_slice());
+        assert_eq!(*result.data(), *expected);
         Ok(())
     }
 
@@ -185,7 +185,7 @@ mod lazy_tests {
         let result = c.realize()?;
 
         // (2*1 + 2 - 1) = 3, (3*1 + 3 - 1) = 5, (4*1 + 4 - 1) = 7, (5*1 + 5 - 1) = 9
-        assert_eq!(result.data(), &[3.0, 5.0, 7.0, 9.0]);
+        assert_eq!(*result.data(), [3.0, 5.0, 7.0, 9.0]);
         Ok(())
     }
 
@@ -197,7 +197,7 @@ mod lazy_tests {
         let c = Tensor::constant(&cx, 10.0, vec![3]);
         let result = (&a + &c).realize()?;
 
-        assert_eq!(result.data(), &[11.0, 12.0, 13.0]);
+        assert_eq!(*result.data(), [11.0, 12.0, 13.0]);
         Ok(())
     }
 
@@ -211,7 +211,7 @@ mod lazy_tests {
         let zero = Tensor::constant(&cx, 0.0, vec![3]);
         // a + 0 should be optimized to just a.
         let result = (&a + &zero).realize()?;
-        assert_eq!(result.data(), &[1.0, 2.0, 3.0]);
+        assert_eq!(*result.data(), [1.0, 2.0, 3.0]);
         Ok(())
     }
 
@@ -223,7 +223,7 @@ mod lazy_tests {
         let one = Tensor::constant(&cx, 1.0, vec![3]);
         // a * 1 should be optimized to just a.
         let result = (&a * &one).realize()?;
-        assert_eq!(result.data(), &[5.0, 10.0, 15.0]);
+        assert_eq!(*result.data(), [5.0, 10.0, 15.0]);
         Ok(())
     }
 
@@ -235,7 +235,7 @@ mod lazy_tests {
         let zero = Tensor::constant(&cx, 0.0, vec![3]);
         // a * 0 should be optimized to 0.
         let result = (&a * &zero).realize()?;
-        assert_eq!(result.data(), &[0.0, 0.0, 0.0]);
+        assert_eq!(*result.data(), [0.0, 0.0, 0.0]);
         Ok(())
     }
 
@@ -246,7 +246,7 @@ mod lazy_tests {
         let a = Tensor::from_slice(&cx, &[1.0, -2.0, 3.0], vec![3]);
         // neg(neg(a)) should be optimized to just a.
         let result = a.neg().neg().realize()?;
-        assert_eq!(result.data(), &[1.0, -2.0, 3.0]);
+        assert_eq!(*result.data(), [1.0, -2.0, 3.0]);
         Ok(())
     }
 
@@ -257,7 +257,7 @@ mod lazy_tests {
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0], vec![3]);
         // exp(ln(a)) should be optimized to just a.
         let result = a.ln().exp().realize()?;
-        assert!(approx_eq(result.data(), &[1.0, 2.0, 3.0], 1e-5));
+        assert!(approx_eq(&result.data(), &[1.0, 2.0, 3.0], 1e-5));
         Ok(())
     }
 
@@ -268,7 +268,7 @@ mod lazy_tests {
         let a = Tensor::from_slice(&cx, &[5.0, 10.0, 15.0], vec![3]);
         // a - a should be optimized to 0.
         let result = (&a - &a).realize()?;
-        assert_eq!(result.data(), &[0.0, 0.0, 0.0]);
+        assert_eq!(*result.data(), [0.0, 0.0, 0.0]);
         Ok(())
     }
 
@@ -279,8 +279,8 @@ mod lazy_tests {
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let r = a.realize()?;
 
-        assert_eq!(r.data(), &[1.0, 2.0, 3.0, 4.0]);
-        assert_eq!(r.shape(), &[2, 2]);
+        assert_eq!(*r.data(), [1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(r.sizes(), &[2, 2]);
         Ok(())
     }
 
@@ -291,8 +291,8 @@ mod lazy_tests {
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let r = a.sum_dims(vec![1], false)?.realize()?;
 
-        assert_eq!(r.data(), &[3.0, 7.0]);
-        assert_eq!(r.shape(), &[2]);
+        assert_eq!(*r.data(), [3.0, 7.0]);
+        assert_eq!(r.sizes(), &[2]);
         Ok(())
     }
 
@@ -303,8 +303,8 @@ mod lazy_tests {
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let r = a.product_dims(vec![0], true)?.realize()?;
 
-        assert_eq!(r.data(), &[3.0, 8.0]);
-        assert_eq!(r.shape(), &[1, 2]);
+        assert_eq!(*r.data(), [3.0, 8.0]);
+        assert_eq!(r.sizes(), &[1, 2]);
         Ok(())
     }
 
@@ -315,8 +315,8 @@ mod lazy_tests {
         let a = Tensor::from_slice(&cx, &[1.0, 9.0, 3.0, 4.0, 7.0, 6.0], vec![2, 3]);
         let r = a.max_dims(vec![0], false)?.realize()?;
 
-        assert_eq!(r.data(), &[4.0, 9.0, 6.0]);
-        assert_eq!(r.shape(), &[3]);
+        assert_eq!(*r.data(), [4.0, 9.0, 6.0]);
+        assert_eq!(r.sizes(), &[3]);
         Ok(())
     }
 
@@ -327,8 +327,8 @@ mod lazy_tests {
         let a = Tensor::from_slice(&cx, &[1.0, 9.0, 3.0, 4.0, 7.0, 6.0], vec![2, 3]);
         let r = a.min_dims(vec![1], true)?.realize()?;
 
-        assert_eq!(r.data(), &[1.0, 4.0]);
-        assert_eq!(r.shape(), &[2, 1]);
+        assert_eq!(*r.data(), [1.0, 4.0]);
+        assert_eq!(r.sizes(), &[2, 1]);
         Ok(())
     }
 
@@ -339,8 +339,8 @@ mod lazy_tests {
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let r = a.sum()?.realize()?;
 
-        assert_eq!(r.data(), &[10.0]);
-        assert_eq!(r.shape(), &[1, 1]);
+        assert_eq!(*r.data(), [10.0]);
+        assert_eq!(r.sizes(), &[1, 1]);
         Ok(())
     }
 
@@ -351,8 +351,8 @@ mod lazy_tests {
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
         let r = a.reshape(vec![3, 2])?.sum_dims(vec![1], false)?.realize()?;
 
-        assert_eq!(r.data(), &[3.0, 7.0, 11.0]);
-        assert_eq!(r.shape(), &[3]);
+        assert_eq!(*r.data(), [3.0, 7.0, 11.0]);
+        assert_eq!(r.sizes(), &[3]);
         Ok(())
     }
 
@@ -365,8 +365,8 @@ mod lazy_tests {
         let bias = Tensor::constant(&cx, 10.0, vec![2, 1]);
         let r = (&summed + &bias).realize()?;
 
-        assert_eq!(r.data(), &[13.0, 17.0]);
-        assert_eq!(r.shape(), &[2, 1]);
+        assert_eq!(*r.data(), [13.0, 17.0]);
+        assert_eq!(r.sizes(), &[2, 1]);
         Ok(())
     }
 
@@ -377,8 +377,8 @@ mod lazy_tests {
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
         let r = a.permute(vec![1, 0])?.sum_dims(vec![1], true)?.realize()?;
 
-        assert_eq!(r.data(), &[5.0, 7.0, 9.0]);
-        assert_eq!(r.shape(), &[3, 1]);
+        assert_eq!(*r.data(), [5.0, 7.0, 9.0]);
+        assert_eq!(r.sizes(), &[3, 1]);
         Ok(())
     }
 
@@ -392,8 +392,8 @@ mod lazy_tests {
             .sum_dims(vec![0], true)?
             .realize()?;
 
-        assert_eq!(r.data(), &[10.0]);
-        assert_eq!(r.shape(), &[1, 1]);
+        assert_eq!(*r.data(), [10.0]);
+        assert_eq!(r.sizes(), &[1, 1]);
         Ok(())
     }
 
@@ -408,8 +408,8 @@ mod lazy_tests {
             .unsqueeze(2)?
             .realize()?;
 
-        assert_eq!(r.data(), &[4.0, 6.0]);
-        assert_eq!(r.shape(), &[1, 2]);
+        assert_eq!(*r.data(), [4.0, 6.0]);
+        assert_eq!(r.sizes(), &[1, 2]);
         Ok(())
     }
 
@@ -424,8 +424,8 @@ mod lazy_tests {
 
         // [[1*7+2*9+3*11, 1*8+2*10+3*12], [4*7+5*9+6*11, 4*8+5*10+6*12]]
         // = [[58, 64], [139, 154]]
-        assert_eq!(r.data(), &[58.0, 64.0, 139.0, 154.0]);
-        assert_eq!(r.shape(), &[2, 2]);
+        assert_eq!(*r.data(), [58.0, 64.0, 139.0, 154.0]);
+        assert_eq!(r.sizes(), &[2, 2]);
         Ok(())
     }
 
@@ -443,8 +443,8 @@ mod lazy_tests {
         let r = a.matmul(&b)?.realize()?;
 
         // multiplying by identity gives back the same values
-        assert_eq!(r.data(), &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
-        assert_eq!(r.shape(), &[2, 2, 2]);
+        assert_eq!(*r.data(), [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+        assert_eq!(r.sizes(), &[2, 2, 2]);
         Ok(())
     }
 }

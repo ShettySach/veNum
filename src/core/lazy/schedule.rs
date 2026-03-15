@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::graph::{Graph, NodeId, Op};
+use super::shape_tracker::ShapeTracker;
 
 /// A fused elementwise kernel: a tree of ops over input buffers producing one output.
 #[derive(Debug)]
@@ -10,10 +11,18 @@ pub struct FusedKernel {
     pub input_buffers: Vec<NodeId>,
     /// Number of elements in the output.
     pub numel: usize,
+    /// Output shape for multi-dim index decomposition in the JIT.
+    pub output_shape: Vec<usize>,
+    /// ShapeTrackers for input buffers that were reached through shape ops.
+    /// Key = NodeId of the input buffer, value = tracker mapping output indices → buffer offsets.
+    pub input_trackers: HashMap<NodeId, ShapeTracker>,
+    /// Maps inlined shape op NodeIds to their ultimate source buffer NodeId.
+    /// Used by the JIT to resolve graph references that point at absorbed shape ops.
+    pub shape_source_map: HashMap<NodeId, NodeId>,
 }
 
 /// Shape-op barrier item.
-/// These run as standalone schedule steps (not fused into elementwise kernels yet).
+/// These run as standalone schedule steps when not absorbed into a fused kernel.
 #[derive(Debug, Clone)]
 pub struct ShapeOpItem {
     pub root: NodeId,
@@ -41,19 +50,6 @@ pub enum ScheduleItem {
 }
 
 /// Build a linear execution schedule from the graph, rooted at `root`.
-///
-/// Algorithm:
-/// 1. Topological sort from root (reverse post-order DFS).
-/// 2. Walk topo order:
-///    - Leaf nodes (`Load`, `Const`) are skipped.
-///    - Shape ops become `ScheduleItem::Shape` barriers.
-///    - Reduce ops become `ScheduleItem::Reduce` barriers.
-///    - Elementwise ops become `ScheduleItem::Fused`.
-/// 3. Fusing rule for elementwise kernels:
-///    - Input can be inlined iff:
-///      a) input is elementwise
-///      b) input has exactly one consumer
-///      c) input has same `numel` as consumer
 pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
     let topo = topo_sort(graph, root);
     let consumer_counts = compute_consumer_counts(graph, &topo);
@@ -75,8 +71,19 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
             continue;
         }
 
-        // Shape ops are explicit barriers.
+        // Shape ops: check if they are consumed only by fused kernels.
+        // If so, they'll be absorbed when the consumer is processed.
+        // If they feed into a reduce or have multiple consumers, emit a barrier.
         if node.op.is_shape_op() {
+            // Check if this shape op will be absorbed by its consumer(s).
+            // A shape op is absorbed if all its consumers are elementwise ops
+            // (or other shape ops that eventually feed into elementwise ops).
+            // For simplicity, we only absorb shape ops that are reachable from
+            // an elementwise op during collect_kernel_inputs.
+            // Here we emit it as a barrier; it may get removed if absorbed.
+            //
+            // Actually, let's just defer: if it hasn't been inlined by the time
+            // we see it, emit a barrier.
             let input = node.inputs[0];
             schedule.push(ScheduleItem::Shape(ShapeOpItem {
                 root: id,
@@ -99,39 +106,115 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
             continue;
         }
 
-        // Elementwise ops can be fused.
+        // Elementwise ops can be fused, absorbing shape ops along the way.
         if node.op.is_elementwise() {
             let mut input_buffers = Vec::new();
+            let mut input_trackers = HashMap::new();
+            let mut shape_source_map = HashMap::new();
+            let output_shape = node.shape.clone();
             collect_kernel_inputs(
                 graph,
                 id,
                 &consumer_counts,
                 &mut inlined,
                 &mut input_buffers,
+                &mut input_trackers,
+                &mut shape_source_map,
+                &output_shape,
             );
+
+            // Remove any previously emitted Shape items that were absorbed.
+            schedule.retain(|item| {
+                if let ScheduleItem::Shape(s) = item {
+                    !inlined.contains(&s.root)
+                } else {
+                    true
+                }
+            });
 
             schedule.push(ScheduleItem::Fused(FusedKernel {
                 root: id,
                 input_buffers,
                 numel: node.numel(),
+                output_shape,
+                input_trackers,
+                shape_source_map,
             }));
             continue;
         }
-
-        // Future non-elementwise ops (matmul/conv/etc.) are intentionally skipped here.
     }
 
     schedule
 }
 
+/// Walk back through a chain of shape ops, composing a ShapeTracker.
+/// Returns Some((source_node_id, tracker)) if the chain can be absorbed.
+/// Returns None if any shape op in the chain can't be composed.
+fn try_build_tracker(
+    graph: &Graph,
+    shape_node_id: NodeId,
+    consumer_counts: &HashMap<NodeId, usize>,
+    output_shape: &[usize],
+) -> Option<(NodeId, ShapeTracker, Vec<NodeId>)> {
+    // Start with a contiguous tracker for the output shape (the elementwise op's shape).
+    // We'll walk backwards through shape ops and apply each one to build the tracker
+    // that maps output indices → source buffer offsets.
+    //
+    // Actually, we need to work differently: start from the source and compose forward.
+    // First, collect the chain of shape ops, then compose them.
+
+    let mut chain = Vec::new(); // (node_id, &Op)
+    let mut current = shape_node_id;
+
+    loop {
+        let node = graph.node(current);
+        if !node.op.is_shape_op() {
+            break;
+        }
+        // Only absorb if single consumer.
+        if *consumer_counts.get(&current).unwrap_or(&0) > 1 {
+            break;
+        }
+        chain.push(current);
+        current = node.inputs[0];
+    }
+
+    // `current` is the source node (Load or a realized barrier).
+    let source = current;
+    let source_shape = &graph.node(source).shape;
+
+    // Build tracker starting from source shape, composing each shape op forward.
+    let mut tracker = ShapeTracker::contiguous(source_shape);
+
+    for &shape_id in chain.iter().rev() {
+        let node = graph.node(shape_id);
+        tracker = match &node.op {
+            Op::Reshape(new_shape) => tracker.reshape(new_shape),
+            Op::Expand(expansions) => tracker.expand(expansions),
+            Op::Permute(axes) => tracker.permute(axes),
+            Op::Transpose(d1, d2) => tracker.transpose(*d1, *d2),
+            Op::Squeeze => Some(tracker.squeeze()),
+            Op::Unsqueeze(new_rank) => tracker.unsqueeze(*new_rank),
+            Op::Flip(dims) => Some(tracker.flip(dims)),
+            _ => return None,
+        }?;
+    }
+
+    Some((source, tracker, chain))
+}
+
 /// Recursively collect the leaf inputs of a fused kernel rooted at `id`.
 /// Mark intermediate fusible nodes as inlined.
+/// When encountering shape ops, try to absorb them via ShapeTracker.
 fn collect_kernel_inputs(
     graph: &Graph,
     id: NodeId,
     consumer_counts: &HashMap<NodeId, usize>,
     inlined: &mut HashSet<NodeId>,
     inputs: &mut Vec<NodeId>,
+    trackers: &mut HashMap<NodeId, ShapeTracker>,
+    source_map: &mut HashMap<NodeId, NodeId>,
+    output_shape: &[usize],
 ) {
     let node = graph.node(id);
 
@@ -144,13 +227,42 @@ fn collect_kernel_inputs(
             continue;
         }
 
+        // Try to absorb a shape op chain.
+        if input_node.op.is_shape_op() {
+            if let Some((source, tracker, chain)) =
+                try_build_tracker(graph, input_id, consumer_counts, output_shape)
+            {
+                // Mark all shape ops in the chain as inlined and record source mapping.
+                for &shape_id in &chain {
+                    inlined.insert(shape_id);
+                    source_map.insert(shape_id, source);
+                }
+
+                // The source becomes a kernel input with a tracker.
+                if !inputs.contains(&source) {
+                    inputs.push(source);
+                }
+                trackers.insert(source, tracker);
+                continue;
+            }
+        }
+
         let can_inline = input_node.op.is_elementwise()
             && *consumer_counts.get(&input_id).unwrap_or(&0) == 1
             && input_node.numel() == node.numel();
 
         if can_inline {
             inlined.insert(input_id);
-            collect_kernel_inputs(graph, input_id, consumer_counts, inlined, inputs);
+            collect_kernel_inputs(
+                graph,
+                input_id,
+                consumer_counts,
+                inlined,
+                inputs,
+                trackers,
+                source_map,
+                output_shape,
+            );
         } else {
             // This is a barrier leaf input for the fused kernel.
             if !inputs.contains(&input_id) {

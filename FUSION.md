@@ -118,14 +118,14 @@ enum Expr {
 Implement `ShapeTracker` with support for:
 
 - [x] `new(shape)` — row-major contiguous
-- [ ] `reshape(new_shape)` — recompute strides (must be contiguous)
-- [ ] `expand(new_shape)` — zero strides on broadcast dims
-- [ ] `permute(axes)` — reorder shape and strides
-- [ ] `transpose(d1, d2)` — swap two dims in shape and strides
+- [x] `reshape(new_shape)` — recompute strides (must be contiguous)
+- [x] `expand(new_shape)` — zero strides on broadcast dims
+- [x] `permute(axes)` — reorder shape and strides
+- [x] `transpose(d1, d2)` — swap two dims in shape and strides
 - [ ] `slice(ranges)` — adjust offset, shape, mask
 - [ ] `pad(padding)` — expand shape, add mask
-- [ ] `stride_at(dim)` / `index(logical_idx) -> Option<usize>` — core query
-- [ ] `is_contiguous()` — can this be reshaped?
+- [x] `index(logical_idx) -> usize` — core query
+- [x] `is_contiguous()` — can this be reshaped?
 
 Reference: tinygrad's `ShapeTracker` in `tinygrad/shape/shapetracker.py`.
 

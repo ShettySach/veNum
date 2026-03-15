@@ -5,6 +5,7 @@ mod jit;
 mod optimize;
 mod render;
 mod schedule;
+pub(crate) mod shape_tracker;
 mod tensor;
 mod tests;
 

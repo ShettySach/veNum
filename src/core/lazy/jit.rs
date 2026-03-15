@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use super::graph::{Graph, NodeId, Op};
 use super::schedule::FusedKernel;
+use super::shape_tracker::ShapeTracker;
 
 /// A compiled kernel ready to execute.
 pub struct CompiledKernel {
@@ -130,6 +131,7 @@ impl CompiledKernel {
 /// Compile a fused elementwise kernel into native code via Cranelift.
 pub fn compile_kernel(graph: &Graph, kernel: &FusedKernel) -> Result<CompiledKernel> {
     let num_inputs = kernel.input_buffers.len();
+    let has_trackers = !kernel.input_trackers.is_empty();
 
     // Map each input buffer NodeId to its parameter index.
     let mut input_index: HashMap<NodeId, usize> = HashMap::new();
@@ -210,15 +212,31 @@ pub fn compile_kernel(graph: &Graph, kernel: &FusedKernel) -> Result<CompiledKer
     let i = builder.block_params(loop_header)[0];
     let cmp = builder.ins().icmp(IntCC::UnsignedLessThan, i, n_param);
     builder.ins().brif(cmp, loop_body, &[], loop_exit, &[]);
-    // Do NOT seal loop_header yet — loop_body back-edge not created yet.
 
     // Loop body
     builder.switch_to_block(loop_body);
-    builder.seal_block(loop_body); // Only predecessor is loop_header (already defined).
+    builder.seal_block(loop_body);
 
-    // Byte offset = i * 4 (sizeof f32)
+    // Byte offset for output = i * 4.
     let four = builder.ins().iconst(types::I64, 4);
     let byte_offset = builder.ins().imul(i, four);
+
+    // If we have trackers, decompose flat index `i` into multi-dim indices.
+    let dim_indices = if has_trackers {
+        Some(decompose_flat_index(&mut builder, i, &kernel.output_shape))
+    } else {
+        None
+    };
+
+    // Pre-compute per-input byte offsets from trackers.
+    let mut tracked_byte_offsets: HashMap<NodeId, Value> = HashMap::new();
+    if let Some(ref dims) = dim_indices {
+        for (&buf_id, tracker) in &kernel.input_trackers {
+            let tracked_offset =
+                compute_tracker_byte_offset(&mut builder, dims, tracker);
+            tracked_byte_offsets.insert(buf_id, tracked_offset);
+        }
+    }
 
     let math_refs = MathFuncRefs {
         expf: expf_ref,
@@ -233,6 +251,8 @@ pub fn compile_kernel(graph: &Graph, kernel: &FusedKernel) -> Result<CompiledKer
         &input_index,
         byte_offset,
         &math_refs,
+        &tracked_byte_offsets,
+        &kernel.shape_source_map,
     )?;
 
     // Store result to out[i]
@@ -249,7 +269,7 @@ pub fn compile_kernel(graph: &Graph, kernel: &FusedKernel) -> Result<CompiledKer
 
     // Exit
     builder.switch_to_block(loop_exit);
-    builder.seal_block(loop_exit); // Only predecessor is loop_header.
+    builder.seal_block(loop_exit);
     builder.ins().return_(&[]);
 
     builder.finalize();
@@ -268,6 +288,61 @@ pub fn compile_kernel(graph: &Graph, kernel: &FusedKernel) -> Result<CompiledKer
     })
 }
 
+/// Decompose a flat index `i` into per-dimension indices for `output_shape`.
+///
+/// For shape [s0, s1, s2]:
+///   d2 = i % s2
+///   d1 = (i / s2) % s1
+///   d0 = (i / (s2 * s1)) % s0
+fn decompose_flat_index(
+    builder: &mut FunctionBuilder,
+    flat_idx: Value,
+    shape: &[usize],
+) -> Vec<Value> {
+    let rank = shape.len();
+    let mut indices = vec![flat_idx; rank]; // placeholder
+    let mut remaining = flat_idx;
+
+    for d in (0..rank).rev() {
+        let size = builder.ins().iconst(types::I64, shape[d] as i64);
+        let idx = builder.ins().urem(remaining, size);
+        indices[d] = idx;
+        if d > 0 {
+            remaining = builder.ins().udiv(remaining, size);
+        }
+    }
+
+    indices
+}
+
+/// Compute the byte offset into a source buffer using a ShapeTracker.
+///
+/// flat_offset = sum(dim_indices[d] * strides[d]) + offset
+/// byte_offset = flat_offset * 4
+fn compute_tracker_byte_offset(
+    builder: &mut FunctionBuilder,
+    dim_indices: &[Value],
+    tracker: &ShapeTracker,
+) -> Value {
+    let mut sum = builder.ins().iconst(types::I64, tracker.offset as i64);
+
+    for (d, &stride) in tracker.strides.iter().enumerate() {
+        if stride == 0 {
+            // Broadcast dimension, contributes nothing.
+            continue;
+        }
+        if d >= dim_indices.len() {
+            break;
+        }
+        let stride_val = builder.ins().iconst(types::I64, stride as i64);
+        let contribution = builder.ins().imul(dim_indices[d], stride_val);
+        sum = builder.ins().iadd(sum, contribution);
+    }
+
+    let four = builder.ins().iconst(types::I64, 4);
+    builder.ins().imul(sum, four)
+}
+
 struct MathFuncRefs {
     expf: cranelift_codegen::ir::FuncRef,
     logf: cranelift_codegen::ir::FuncRef,
@@ -282,16 +357,21 @@ fn build_expression(
     input_index: &HashMap<NodeId, usize>,
     byte_offset: Value,
     math: &MathFuncRefs,
+    tracked_byte_offsets: &HashMap<NodeId, Value>,
+    shape_source_map: &HashMap<NodeId, NodeId>,
 ) -> Result<Value> {
     let node = graph.node(id);
 
     match &node.op {
         op if !op.is_elementwise() && !matches!(op, Op::Const(_)) => {
+            // If this is an inlined shape op, resolve to its source buffer.
+            let resolved_id = shape_source_map.get(&id).copied().unwrap_or(id);
             let idx = input_index
-                .get(&id)
+                .get(&resolved_id)
                 .ok_or_else(|| anyhow::anyhow!("Barrier node {:?} not found in input_index", id))?;
             let ptr = input_ptrs[*idx];
-            let addr = builder.ins().iadd(ptr, byte_offset);
+            let offset = tracked_byte_offsets.get(&resolved_id).copied().unwrap_or(byte_offset);
+            let addr = builder.ins().iadd(ptr, offset);
             Ok(builder.ins().load(types::F32, MemFlags::new(), addr, 0))
         }
         Op::Load => {
@@ -299,7 +379,8 @@ fn build_expression(
                 .get(&id)
                 .ok_or_else(|| anyhow::anyhow!("Load node {:?} not found in input_index", id))?;
             let ptr = input_ptrs[*idx];
-            let addr = builder.ins().iadd(ptr, byte_offset);
+            let offset = tracked_byte_offsets.get(&id).copied().unwrap_or(byte_offset);
+            let addr = builder.ins().iadd(ptr, offset);
             Ok(builder.ins().load(types::F32, MemFlags::new(), addr, 0))
         }
         Op::Const(val) => Ok(builder.ins().f32const(*val)),
@@ -312,6 +393,8 @@ fn build_expression(
                 input_index,
                 byte_offset,
                 math,
+                tracked_byte_offsets,
+                shape_source_map,
             )?;
             let rhs = build_expression(
                 graph,
@@ -321,6 +404,8 @@ fn build_expression(
                 input_index,
                 byte_offset,
                 math,
+                tracked_byte_offsets,
+                shape_source_map,
             )?;
             Ok(match node.op {
                 Op::Add => builder.ins().fadd(lhs, rhs),
@@ -339,6 +424,8 @@ fn build_expression(
                 input_index,
                 byte_offset,
                 math,
+                tracked_byte_offsets,
+                shape_source_map,
             )?;
             Ok(builder.ins().fneg(val))
         }
@@ -351,6 +438,8 @@ fn build_expression(
                 input_index,
                 byte_offset,
                 math,
+                tracked_byte_offsets,
+                shape_source_map,
             )?;
             let call = builder.ins().call(math.expf, &[val]);
             Ok(builder.inst_results(call)[0])
@@ -364,6 +453,8 @@ fn build_expression(
                 input_index,
                 byte_offset,
                 math,
+                tracked_byte_offsets,
+                shape_source_map,
             )?;
             let call = builder.ins().call(math.logf, &[val]);
             Ok(builder.inst_results(call)[0])
@@ -377,6 +468,8 @@ fn build_expression(
                 input_index,
                 byte_offset,
                 math,
+                tracked_byte_offsets,
+                shape_source_map,
             )?;
             Ok(builder.ins().sqrt(val))
         }
