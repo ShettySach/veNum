@@ -1,13 +1,3 @@
-use anyhow::{anyhow, bail, Result};
-
-use std::{cmp::Ordering, sync::Arc};
-
-use crate::core::{
-    errors::{ExpansionError, ReshapeError, TransposeError, UnsqueezeError},
-    iters::Indexer,
-    naive::NaiveTensor,
-};
-
 use super::{
     context::Context,
     graph::{Graph, NodeId, Op},
@@ -15,6 +5,13 @@ use super::{
     optimize, render,
     schedule::{build_schedule, ScheduleItem},
 };
+use crate::core::{
+    errors::{ExpansionError, ReshapeError, TransposeError, UnsqueezeError},
+    iters::Indexer,
+    naive::NaiveTensor,
+};
+use anyhow::{anyhow, bail, Result};
+use std::{cmp::Ordering, sync::Arc};
 
 #[derive(Clone)]
 pub struct Tensor {
@@ -512,6 +509,82 @@ impl Tensor {
         render::render_fused_dag(&opt_graph, opt_root)
     }
 
+    pub fn render_kernels(&self) -> String {
+        use std::fmt::Write;
+
+        let graph = self.graph.lock().unwrap();
+        let optimize_safe = is_optimize_safe(&graph, self.id);
+        let (exec_graph, exec_root) = if optimize_safe {
+            optimize::optimize(&graph, self.id)
+        } else {
+            clone_reachable_subgraph(&graph, self.id)
+        };
+        drop(graph);
+
+        let schedule = build_schedule(&exec_graph, exec_root);
+        let mut out = String::new();
+
+        writeln!(out, "Schedule: {} items", schedule.len()).unwrap();
+        writeln!(out, "{}", "=".repeat(60)).unwrap();
+
+        for (idx, item) in schedule.iter().enumerate() {
+            match item {
+                ScheduleItem::Shape(s) => {
+                    writeln!(out, "\n[{}] Shape {:?} → {:?}", idx, s.op, s.shape).unwrap();
+                }
+                ScheduleItem::Reduce(r) => {
+                    writeln!(out, "\n[{}] Reduce {:?} → {:?}", idx, r.op, r.shape).unwrap();
+                }
+                ScheduleItem::Fused(kernel) => {
+                    writeln!(
+                        out,
+                        "\n[{}] Fused kernel  numel={}  output_shape={:?}",
+                        idx, kernel.numel, kernel.output_shape
+                    )
+                    .unwrap();
+                    writeln!(out, "    inputs: {} buffers", kernel.input_buffers.len()).unwrap();
+
+                    for &buf_id in &kernel.input_buffers {
+                        let node = exec_graph.node(buf_id);
+                        if let Some(tracker) = kernel.input_trackers.get(&buf_id) {
+                            writeln!(
+                                out,
+                                "      {:?} {:?} → tracker shape={:?} strides={:?} offset={}",
+                                buf_id, node.shape, tracker.shape, tracker.strides, tracker.offset
+                            )
+                            .unwrap();
+                        } else {
+                            writeln!(out, "      {:?} {:?} (flat)", buf_id, node.shape).unwrap();
+                        }
+                    }
+
+                    if !kernel.shape_source_map.is_empty() {
+                        writeln!(
+                            out,
+                            "    absorbed {} shape ops",
+                            kernel.shape_source_map.len()
+                        )
+                        .unwrap();
+                    }
+
+                    match compile_kernel(&exec_graph, kernel) {
+                        Ok(compiled) => {
+                            writeln!(out, "\n    --- CLIF IR ---").unwrap();
+                            for line in compiled.clif_ir.lines() {
+                                writeln!(out, "    {}", line).unwrap();
+                            }
+                        }
+                        Err(e) => {
+                            writeln!(out, "    (compilation error: {})", e).unwrap();
+                        }
+                    }
+                }
+            }
+        }
+
+        out
+    }
+
     // -------- realize --------
 
     pub fn realize(&self) -> Result<NaiveTensor<f32>> {
@@ -523,7 +596,7 @@ impl Tensor {
             let data = buffer.as_f32();
             let shape = root_node.shape.clone();
             // drop(graph);
-            return Ok(NaiveTensor::new(&data, &shape)?);
+            return NaiveTensor::new(data, &shape);
         }
 
         // Only optimize pure elementwise roots for now.

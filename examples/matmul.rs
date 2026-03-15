@@ -1,8 +1,9 @@
 use venum::{NaiveTensor, Tensor};
 
 fn main() -> anyhow::Result<()> {
-    let a = NaiveTensor::arange(0.25, 50.25, 1.0)?.view(&[5, 5, 2])?;
-    let b = NaiveTensor::arange(0.75, 10.75, 1.0)?.view(&[2, 5])?;
+    let a = NaiveTensor::arange(0.0, 18.0, 1.0)?.view(&[3, 3, 2])?;
+    let b = NaiveTensor::arange(0.0, 10.0, 1.0)?.view(&[2, 5])?;
+
     println!("{}", a);
     println!("{}", b);
 
@@ -10,8 +11,9 @@ fn main() -> anyhow::Result<()> {
     println!("{}", c);
 
     let cx = venum::Context::new();
-    let x = Tensor::arange(&cx, 0.25, 50.25, 1.0)?.reshape(vec![5, 5, 2])?;
-    let y = Tensor::arange(&cx, 0.75, 10.25, 1.0)?.reshape(vec![2, 5])?;
+
+    let x = Tensor::arange(&cx, 0.0, 18.0, 1.0)?.reshape(vec![3, 3, 2])?;
+    let y = Tensor::arange(&cx, 0.0, 10.0, 1.0)?.reshape(vec![2, 5])?;
 
     let z = x.matmul(&y)?;
 
@@ -20,6 +22,9 @@ fn main() -> anyhow::Result<()> {
     println!();
     println!("FUSED DAG");
     println!("{}", z.render_fused_dag());
+    println!();
+    println!("KERNELS");
+    println!("{}", z.render_kernels());
 
     println!("{}", z.realize()?);
 

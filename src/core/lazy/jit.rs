@@ -17,6 +17,8 @@ pub struct CompiledKernel {
     _module: JITModule,
     /// Raw function pointer to the compiled kernel.
     fn_ptr: *const u8,
+    /// Cranelift IR (CLIF) text, captured before compilation.
+    pub clif_ir: String,
 }
 
 // Safety: The compiled code is immutable once created and the function pointer
@@ -232,8 +234,7 @@ pub fn compile_kernel(graph: &Graph, kernel: &FusedKernel) -> Result<CompiledKer
     let mut tracked_byte_offsets: HashMap<NodeId, Value> = HashMap::new();
     if let Some(ref dims) = dim_indices {
         for (&buf_id, tracker) in &kernel.input_trackers {
-            let tracked_offset =
-                compute_tracker_byte_offset(&mut builder, dims, tracker);
+            let tracked_offset = compute_tracker_byte_offset(&mut builder, dims, tracker);
             tracked_byte_offsets.insert(buf_id, tracked_offset);
         }
     }
@@ -274,9 +275,13 @@ pub fn compile_kernel(graph: &Graph, kernel: &FusedKernel) -> Result<CompiledKer
 
     builder.finalize();
 
+    // Capture CLIF IR before compilation.
+    let clif_ir = format!("{}", func.display());
+
     // --- Compile ---
     let mut ctx = cranelift_codegen::Context::for_function(func);
     module.define_function(func_id, &mut ctx)?;
+
     module.finalize_definitions()?;
 
     let fn_ptr = module.get_finalized_function(func_id);
@@ -285,6 +290,7 @@ pub fn compile_kernel(graph: &Graph, kernel: &FusedKernel) -> Result<CompiledKer
         num_inputs,
         _module: module,
         fn_ptr,
+        clif_ir,
     })
 }
 
@@ -370,7 +376,10 @@ fn build_expression(
                 .get(&resolved_id)
                 .ok_or_else(|| anyhow::anyhow!("Barrier node {:?} not found in input_index", id))?;
             let ptr = input_ptrs[*idx];
-            let offset = tracked_byte_offsets.get(&resolved_id).copied().unwrap_or(byte_offset);
+            let offset = tracked_byte_offsets
+                .get(&resolved_id)
+                .copied()
+                .unwrap_or(byte_offset);
             let addr = builder.ins().iadd(ptr, offset);
             Ok(builder.ins().load(types::F32, MemFlags::new(), addr, 0))
         }
@@ -379,7 +388,10 @@ fn build_expression(
                 .get(&id)
                 .ok_or_else(|| anyhow::anyhow!("Load node {:?} not found in input_index", id))?;
             let ptr = input_ptrs[*idx];
-            let offset = tracked_byte_offsets.get(&id).copied().unwrap_or(byte_offset);
+            let offset = tracked_byte_offsets
+                .get(&id)
+                .copied()
+                .unwrap_or(byte_offset);
             let addr = builder.ins().iadd(ptr, offset);
             Ok(builder.ins().load(types::F32, MemFlags::new(), addr, 0))
         }
