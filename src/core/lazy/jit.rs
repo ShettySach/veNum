@@ -17,8 +17,8 @@ pub struct CompiledKernel {
     _module: JITModule,
     /// Raw function pointer to the compiled kernel.
     fn_ptr: *const u8,
-    /// Cranelift IR (CLIF) text, captured before compilation.
-    pub clif_ir: String,
+    /// Cranelift IR (CLIF) text, captured only when requested.
+    pub clif_ir: Option<String>,
 }
 
 // Safety: The compiled code is immutable once created and the function pointer
@@ -131,7 +131,14 @@ impl CompiledKernel {
 }
 
 /// Compile a fused elementwise kernel into native code via Cranelift.
-pub fn compile_kernel(graph: &Graph, kernel: &FusedKernel) -> Result<CompiledKernel> {
+///
+/// When `capture_ir` is true, the Cranelift IR text is stored in the returned
+/// `CompiledKernel` for debug/visualization purposes.
+pub fn compile_kernel(
+    graph: &Graph,
+    kernel: &FusedKernel,
+    capture_ir: bool,
+) -> Result<CompiledKernel> {
     let num_inputs = kernel.input_buffers.len();
     let has_trackers = !kernel.input_trackers.is_empty();
 
@@ -275,8 +282,11 @@ pub fn compile_kernel(graph: &Graph, kernel: &FusedKernel) -> Result<CompiledKer
 
     builder.finalize();
 
-    // Capture CLIF IR before compilation.
-    let clif_ir = format!("{}", func.display());
+    let clif_ir = if capture_ir {
+        Some(func.display().to_string())
+    } else {
+        None
+    };
 
     // --- Compile ---
     let mut ctx = cranelift_codegen::Context::for_function(func);
