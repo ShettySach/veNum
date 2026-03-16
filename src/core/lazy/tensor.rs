@@ -1,7 +1,7 @@
 use super::{
-    context::Context,
+    context::{Context, KernelCache},
     graph::{Graph, NodeId, Op},
-    jit::compile_kernel,
+    jit::{compile_kernel, KernelSignature},
     optimize, render,
     schedule::{build_schedule, ScheduleItem},
 };
@@ -16,6 +16,7 @@ use std::{cmp::Ordering, sync::Arc};
 #[derive(Clone)]
 pub struct Tensor {
     graph: Arc<std::sync::Mutex<Graph>>,
+    kernel_cache: KernelCache,
     id: NodeId,
     shape: Vec<usize>,
 }
@@ -25,17 +26,36 @@ impl Tensor {
         f(&mut self.graph.lock().unwrap())
     }
 
+    fn derived(&self, id: NodeId, shape: Vec<usize>) -> Self {
+        Self {
+            graph: Arc::clone(&self.graph),
+            kernel_cache: Arc::clone(&self.kernel_cache),
+            id,
+            shape,
+        }
+    }
+
     pub fn from_slice(cx: &Context, data: &[f32], shape: Vec<usize>) -> Self {
         let data = Arc::new(data.to_vec());
         let graph = cx.graph();
         let id = graph.lock().unwrap().load(data, shape.clone());
-        Self { graph, id, shape }
+        Self {
+            graph,
+            kernel_cache: cx.kernel_cache(),
+            id,
+            shape,
+        }
     }
 
     pub fn constant(cx: &Context, value: f32, shape: Vec<usize>) -> Self {
         let graph = cx.graph();
         let id = graph.lock().unwrap().constant(value, shape.clone());
-        Self { graph, id, shape }
+        Self {
+            graph,
+            kernel_cache: cx.kernel_cache(),
+            id,
+            shape,
+        }
     }
 
     pub fn arange(cx: &Context, start: f32, end: f32, step: f32) -> anyhow::Result<Self> {
@@ -81,20 +101,12 @@ impl Tensor {
             "binary_op requires both tensors to share the same Context"
         );
         let id = self.with_graph_mut(|g| g.binary(op, self.id, rhs.id));
-        Tensor {
-            graph: Arc::clone(&self.graph),
-            id,
-            shape: self.shape.clone(),
-        }
+        self.derived(id, self.shape.clone())
     }
 
     fn unary_op(&self, op: Op) -> Tensor {
         let id = self.with_graph_mut(|g| g.unary(op, self.id));
-        Tensor {
-            graph: Arc::clone(&self.graph),
-            id,
-            shape: self.shape.clone(),
-        }
+        self.derived(id, self.shape.clone())
     }
 
     pub fn exp(&self) -> Tensor {
@@ -126,11 +138,7 @@ impl Tensor {
         }
 
         let id = self.with_graph_mut(|g| g.reshape(self.id, sizes.clone()));
-        Ok(Tensor {
-            graph: Arc::clone(&self.graph),
-            id,
-            shape: sizes,
-        })
+        Ok(self.derived(id, sizes))
     }
 
     pub fn permute(&self, permutation: Vec<usize>) -> Result<Tensor> {
@@ -154,11 +162,7 @@ impl Tensor {
 
         let shape: Vec<_> = permutation.iter().map(|&i| self.shape[i]).collect();
         let id = self.with_graph_mut(|g| g.permute(self.id, permutation, shape.clone()));
-        Ok(Tensor {
-            graph: Arc::clone(&self.graph),
-            id,
-            shape,
-        })
+        Ok(self.derived(id, shape))
     }
 
     pub fn transpose(&self, dim_1: usize, dim_2: usize) -> Result<Tensor> {
@@ -171,11 +175,7 @@ impl Tensor {
         shape.swap(dim_1, dim_2);
 
         let id = self.with_graph_mut(|g| g.transpose(self.id, dim_1, dim_2, shape.clone()));
-        Ok(Tensor {
-            graph: Arc::clone(&self.graph),
-            id,
-            shape,
-        })
+        Ok(self.derived(id, shape))
     }
 
     pub fn expand(&self, expansions: Vec<usize>) -> Result<Tensor> {
@@ -196,11 +196,7 @@ impl Tensor {
         }
 
         let id = self.with_graph_mut(|g| g.expand(self.id, expansions.clone(), expansions.clone()));
-        Ok(Tensor {
-            graph: Arc::clone(&self.graph),
-            id,
-            shape: expansions,
-        })
+        Ok(self.derived(id, expansions))
     }
 
     pub fn slice(&self, ranges: Vec<(usize, usize)>) -> Result<Tensor> {
@@ -228,11 +224,7 @@ impl Tensor {
         }
 
         let id = self.with_graph_mut(|g| g.slice(self.id, ranges, out.clone()));
-        Ok(Tensor {
-            graph: Arc::clone(&self.graph),
-            id,
-            shape: out,
-        })
+        Ok(self.derived(id, out))
     }
 
     pub fn flip(&self, flips: Vec<usize>) -> Result<Tensor> {
@@ -248,11 +240,7 @@ impl Tensor {
 
         let shape = self.shape.clone();
         let id = self.with_graph_mut(|g| g.flip(self.id, flips, shape.clone()));
-        Ok(Tensor {
-            graph: Arc::clone(&self.graph),
-            id,
-            shape,
-        })
+        Ok(self.derived(id, shape))
     }
 
     pub fn squeeze(&self) -> Result<Tensor> {
@@ -262,11 +250,7 @@ impl Tensor {
         }
 
         let id = self.with_graph_mut(|g| g.squeeze(self.id, shape.clone()));
-        Ok(Tensor {
-            graph: Arc::clone(&self.graph),
-            id,
-            shape,
-        })
+        Ok(self.derived(id, shape))
     }
 
     pub fn unsqueeze(&self, new_rank: usize) -> Result<Tensor> {
@@ -285,11 +269,7 @@ impl Tensor {
         shape.extend_from_slice(&self.shape);
 
         let id = self.with_graph_mut(|g| g.unsqueeze(self.id, new_rank, shape.clone()));
-        Ok(Tensor {
-            graph: Arc::clone(&self.graph),
-            id,
-            shape,
-        })
+        Ok(self.derived(id, shape))
     }
 
     pub fn pad(&self, constant: f32, padding: Vec<(usize, usize)>) -> Result<Tensor> {
@@ -302,11 +282,7 @@ impl Tensor {
         }
 
         let id = self.with_graph_mut(|g| g.pad(self.id, constant, pad, shape.clone()));
-        Ok(Tensor {
-            graph: Arc::clone(&self.graph),
-            id,
-            shape,
-        })
+        Ok(self.derived(id, shape))
     }
 
     // -------- reduce lazy ops --------
@@ -314,41 +290,25 @@ impl Tensor {
     pub fn sum_dims(&self, dimensions: Vec<usize>, keepdims: bool) -> Result<Tensor> {
         let shape = reduced_shape(&self.shape, &dimensions, keepdims)?;
         let id = self.with_graph_mut(|g| g.sum(self.id, dimensions, keepdims, shape.clone()));
-        Ok(Tensor {
-            graph: Arc::clone(&self.graph),
-            id,
-            shape,
-        })
+        Ok(self.derived(id, shape))
     }
 
     pub fn product_dims(&self, dimensions: Vec<usize>, keepdims: bool) -> Result<Tensor> {
         let shape = reduced_shape(&self.shape, &dimensions, keepdims)?;
         let id = self.with_graph_mut(|g| g.prod(self.id, dimensions, keepdims, shape.clone()));
-        Ok(Tensor {
-            graph: Arc::clone(&self.graph),
-            id,
-            shape,
-        })
+        Ok(self.derived(id, shape))
     }
 
     pub fn max_dims(&self, dimensions: Vec<usize>, keepdims: bool) -> Result<Tensor> {
         let shape = reduced_shape(&self.shape, &dimensions, keepdims)?;
         let id = self.with_graph_mut(|g| g.max(self.id, dimensions, keepdims, shape.clone()));
-        Ok(Tensor {
-            graph: Arc::clone(&self.graph),
-            id,
-            shape,
-        })
+        Ok(self.derived(id, shape))
     }
 
     pub fn min_dims(&self, dimensions: Vec<usize>, keepdims: bool) -> Result<Tensor> {
         let shape = reduced_shape(&self.shape, &dimensions, keepdims)?;
         let id = self.with_graph_mut(|g| g.min(self.id, dimensions, keepdims, shape.clone()));
-        Ok(Tensor {
-            graph: Arc::clone(&self.graph),
-            id,
-            shape,
-        })
+        Ok(self.derived(id, shape))
     }
 
     pub fn sum(&self) -> Result<Tensor> {
@@ -574,7 +534,17 @@ impl Tensor {
         for item in &schedule {
             match item {
                 ScheduleItem::Fused(kernel) => {
-                    let compiled = compile_kernel(graph, kernel, false)?;
+                    let sig = KernelSignature::from_kernel(graph, kernel);
+                    let compiled = {
+                        let mut cache = self.kernel_cache.lock().unwrap();
+                        if let Some(cached) = cache.get(&sig) {
+                            Arc::clone(cached)
+                        } else {
+                            let compiled = Arc::new(compile_kernel(graph, kernel, false)?);
+                            cache.insert(sig, Arc::clone(&compiled));
+                            compiled
+                        }
+                    };
 
                     let input_ptrs: Vec<*const f32> = kernel
                         .input_buffers
@@ -603,13 +573,13 @@ impl Tensor {
 
                     let output = {
                         let input_data: &[f32] =
-                        {
-                      data  
-                        se if let Some(ref buf) = input_node.buffer {
-                            as_f32()
-                        se {
-                            !("Shape op input {:?} is not realized", shape_item.input);
-                        
+                            if let Some(data) = realized.get(&shape_item.input) {
+                                data
+                            } else if let Some(ref buf) = input_node.buffer {
+                                buf.as_f32()
+                            } else {
+                                bail!("Shape op input {:?} is not realized", shape_item.input);
+                            };
                         execute_shape_op(
                             &shape_item.op,
                             input_data,
@@ -630,7 +600,13 @@ impl Tensor {
                             } else if let Some(ref buf) = input_node.buffer {
                                 buf.as_f32()
                             } else {
-                                bail!(e_item.inputuce_item.op,
+                                bail!(
+                                    "Reduce op input {:?} is not realized",
+                                    reduce_item.input
+                                );
+                            };
+                        execute_reduce_op(
+                            &reduce_item.op,
                             input_data,
                             input_shape,
                             &reduce_item.shape,
@@ -812,41 +788,13 @@ fn collect_reduce_values(
         for i in 0..input_shape[dim] {
             current[dim] = i;
             collect_reduce_values(
-                input_data,
-                input_shape,
-                is_reduce_dim,
-                input_data,
-                input_shape,
-                is_reduce_dim,
-                fixed,
-                dim + 1,
-                current,
-                values,
-            
-                fixed,
-                dim + 1,
-                current,
-                values,
-            input_data,
-           
-           
-            fixed,
-            dim + 1,
-            current,
-            values,
-        
+                input_data, input_shape, is_reduce_dim, fixed, dim + 1, current, values,
             );
         }
     } else {
         current[dim] = fixed[dim];
         collect_reduce_values(
-            input_data,
-            input_shape,
-            is_reduce_dim,
-            fixed,
-            dim + 1,
-            current,
-            values,
+            input_data, input_shape, is_reduce_dim, fixed, dim + 1, current, values,
         );
     }
 }

@@ -4,10 +4,105 @@ use cranelift_codegen::ir::Function;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{Linkage, Module};
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
 use super::graph::{Graph, NodeId, Op};
 use super::schedule::FusedKernel;
 use super::shape_tracker::ShapeTracker;
+
+// -------- kernel signature (structural identity for caching) --------
+
+/// Structural identity of a fused kernel, used as a cache key.
+///
+/// Two kernels with the same op tree, shapes, and tracker layouts will produce
+/// identical machine code, so they can share a single `CompiledKernel`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct KernelSignature(u64);
+
+impl KernelSignature {
+    /// Compute the structural signature of a fused kernel by hashing its
+    /// expression tree (ops + shapes + trackers), ignoring concrete data.
+    pub fn from_kernel(graph: &Graph, kernel: &FusedKernel) -> Self {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+
+        // Hash output shape and numel.
+        kernel.output_shape.hash(&mut hasher);
+        kernel.numel.hash(&mut hasher);
+
+        // Build input_index the same way compile_kernel does.
+        let mut input_index: HashMap<NodeId, usize> = HashMap::new();
+        for (i, &buf_id) in kernel.input_buffers.iter().enumerate() {
+            input_index.insert(buf_id, i);
+        }
+
+        // Hash the expression tree structure.
+        hash_expr(
+            graph,
+            kernel.root,
+            &input_index,
+            &kernel.input_trackers,
+            &kernel.shape_source_map,
+            &mut hasher,
+        );
+
+        KernelSignature(hasher.finish())
+    }
+}
+
+/// Recursively hash the expression tree rooted at `id`.
+fn hash_expr(
+    graph: &Graph,
+    id: NodeId,
+    input_index: &HashMap<NodeId, usize>,
+    trackers: &HashMap<NodeId, ShapeTracker>,
+    source_map: &HashMap<NodeId, NodeId>,
+    hasher: &mut impl Hasher,
+) {
+    let node = graph.node(id);
+
+    // Hash a discriminant tag for the op.
+    std::mem::discriminant(&node.op).hash(hasher);
+
+    match &node.op {
+        Op::Const(v) => v.to_bits().hash(hasher),
+        Op::Load => {
+            // Leaf — hash its input index and any tracker.
+            let resolved = source_map.get(&id).copied().unwrap_or(id);
+            if let Some(&idx) = input_index.get(&resolved) {
+                0u8.hash(hasher); // tag: indexed input
+                idx.hash(hasher);
+                if let Some(tracker) = trackers.get(&resolved) {
+                    hash_tracker(tracker, hasher);
+                }
+            }
+        }
+        op if !op.is_elementwise() => {
+            // Inlined shape op resolved to a source buffer.
+            let resolved = source_map.get(&id).copied().unwrap_or(id);
+            if let Some(&idx) = input_index.get(&resolved) {
+                1u8.hash(hasher); // tag: resolved shape op
+                idx.hash(hasher);
+                if let Some(tracker) = trackers.get(&resolved) {
+                    hash_tracker(tracker, hasher);
+                }
+            }
+        }
+        _ => {
+            // Elementwise ops — recurse into children.
+            for &input_id in &node.inputs {
+                hash_expr(graph, input_id, input_index, trackers, source_map, hasher);
+            }
+        }
+    }
+}
+
+fn hash_tracker(tracker: &ShapeTracker, hasher: &mut impl Hasher) {
+    tracker.shape.hash(hasher);
+    tracker.strides.hash(hasher);
+    tracker.offset.hash(hasher);
+}
+
+// -------- compiled kernel --------
 
 /// A compiled kernel ready to execute.
 pub struct CompiledKernel {
