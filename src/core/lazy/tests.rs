@@ -534,11 +534,10 @@ mod lazy_tests {
 
         let expected: Vec<f64> = [0.0f64, 1.0, 2.0].iter().map(|x| x.exp()).collect();
         let data = r.data_f64();
-        assert!(
-            data.iter()
-                .zip(expected.iter())
-                .all(|(a, b)| (a - b).abs() < 1e-10),
-        );
+        assert!(data
+            .iter()
+            .zip(expected.iter())
+            .all(|(a, b)| (a - b).abs() < 1e-10),);
         Ok(())
     }
 

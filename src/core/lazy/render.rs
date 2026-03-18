@@ -44,20 +44,32 @@ fn node_label(graph: &Graph, id: NodeId) -> String {
                     let len = b.len();
                     match b {
                         super::dtype::Buffer::F32(v) => {
-                            if len <= 4 { format!("{:?}", &**v) }
-                            else { format!("[{}, {}, ... {}]", v[0], v[1], v[len - 1]) }
+                            if len <= 4 {
+                                format!("{:?}", &**v)
+                            } else {
+                                format!("[{}, {}, ... {}]", v[0], v[1], v[len - 1])
+                            }
                         }
                         super::dtype::Buffer::F64(v) => {
-                            if len <= 4 { format!("{:?}", &**v) }
-                            else { format!("[{}, {}, ... {}]", v[0], v[1], v[len - 1]) }
+                            if len <= 4 {
+                                format!("{:?}", &**v)
+                            } else {
+                                format!("[{}, {}, ... {}]", v[0], v[1], v[len - 1])
+                            }
                         }
                         super::dtype::Buffer::I32(v) => {
-                            if len <= 4 { format!("{:?}", &**v) }
-                            else { format!("[{}, {}, ... {}]", v[0], v[1], v[len - 1]) }
+                            if len <= 4 {
+                                format!("{:?}", &**v)
+                            } else {
+                                format!("[{}, {}, ... {}]", v[0], v[1], v[len - 1])
+                            }
                         }
                         super::dtype::Buffer::I64(v) => {
-                            if len <= 4 { format!("{:?}", &**v) }
-                            else { format!("[{}, {}, ... {}]", v[0], v[1], v[len - 1]) }
+                            if len <= 4 {
+                                format!("{:?}", &**v)
+                            } else {
+                                format!("[{}, {}, ... {}]", v[0], v[1], v[len - 1])
+                            }
                         }
                     }
                 })
@@ -214,15 +226,28 @@ fn collect_fused_nodes(
     node_to_kernel: &mut std::collections::HashMap<usize, usize>,
     ki: usize,
 ) {
-    let node = graph.node(id);
-    for &input_id in &node.inputs {
-        if input_buffers.contains(&input_id) {
-            continue;
+    use std::collections::HashSet;
+
+    let input_set: HashSet<NodeId> = input_buffers.iter().copied().collect();
+
+    fn dfs(
+        graph: &Graph,
+        id: NodeId,
+        input_set: &std::collections::HashSet<NodeId>,
+        node_to_kernel: &mut std::collections::HashMap<usize, usize>,
+        ki: usize,
+    ) {
+        let node = graph.node(id);
+        for &input_id in &node.inputs {
+            if input_set.contains(&input_id) {
+                continue;
+            }
+            node_to_kernel.insert(input_id.0, ki);
+            dfs(graph, input_id, input_set, node_to_kernel, ki);
         }
-        // This node is inlined into the kernel.
-        node_to_kernel.insert(input_id.0, ki);
-        collect_fused_nodes(graph, input_id, input_buffers, node_to_kernel, ki);
     }
+
+    dfs(graph, id, &input_set, node_to_kernel, ki);
 }
 
 fn render_leaf_nodes(

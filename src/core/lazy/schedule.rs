@@ -154,7 +154,7 @@ fn try_build_tracker(
     graph: &Graph,
     shape_node_id: NodeId,
     consumer_counts: &HashMap<NodeId, usize>,
-    output_shape: &[usize],
+    _output_shape: &[usize],
 ) -> Option<(NodeId, ShapeTracker, Vec<NodeId>)> {
     // Start with a contiguous tracker for the output shape (the elementwise op's shape).
     // We'll walk backwards through shape ops and apply each one to build the tracker

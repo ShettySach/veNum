@@ -8,7 +8,7 @@ use crate::{
 
 impl<T> NaiveTensor<T>
 where
-    T: Copy + Mul<Output = T> + Sum<T> + Default,
+    T: Copy + Mul<Output = T> + Sum<T> + Default + std::ops::Add<Output = T>,
 {
     pub fn matmul_2d(&self, rhs: &NaiveTensor<T>) -> Result<NaiveTensor<T>> {
         let (n1, n2) = (self.shape.sizes[1], rhs.shape.sizes[0]);
@@ -17,6 +17,32 @@ where
             bail!(MatmulShapeError::Matmul2d { n1, n2 });
         }
 
+        // Fast path: contiguous buffers with standard row-major layout.
+        if self.is_contiguous() && rhs.is_contiguous() {
+            let m = self.sizes()[0];
+            let k = n1;
+            let n = rhs.sizes()[1];
+
+            let a = self.data_contiguous();
+            let b = rhs.data_contiguous();
+            let mut out = vec![T::default(); m * n];
+
+            for i in 0..m {
+                for j in 0..n {
+                    let mut acc = T::default();
+                    for p in 0..k {
+                        let a_idx = i * k + p;
+                        let b_idx = p * n + j;
+                        acc = acc + a[a_idx] * b[b_idx];
+                    }
+                    out[i * n + j] = acc;
+                }
+            }
+
+            return NaiveTensor::init(out, &[m, n]);
+        }
+
+        // Fallback: original slice-based implementation for non-contiguous cases.
         let rhs = rhs.transpose(1, 0)?.to_contiguous()?;
         let (m, l) = (self.sizes()[0], rhs.sizes()[0]);
 

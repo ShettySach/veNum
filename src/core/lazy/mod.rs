@@ -1,5 +1,6 @@
 mod context;
 mod dtype;
+mod exec;
 mod graph;
 mod jit;
 mod optimize;

@@ -14,9 +14,13 @@ fn main() -> anyhow::Result<()> {
     println!("=== expand([3,4]) + b (tracker) ===");
     let cx2 = Context::new();
     let a2 = Tensor::from_slice(&cx2, &[1.0, 2.0, 3.0], vec![3, 1]);
-    let b2 = Tensor::from_slice(&cx2, &[10.0, 20.0, 30.0, 40.0,
-                                          50.0, 60.0, 70.0, 80.0,
-                                          90.0, 100.0, 110.0, 120.0], vec![3, 4]);
+    let b2 = Tensor::from_slice(
+        &cx2,
+        &[
+            10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0,
+        ],
+        vec![3, 4],
+    );
     let c2 = (&a2.expand(vec![3, 4])? + &b2)?;
     println!("{}", c2.render_kernels()?);
 
