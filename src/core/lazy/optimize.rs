@@ -1,4 +1,4 @@
-use super::dtype::DType;
+use super::dtype::{DType, Scalar};
 use super::graph::{Graph, Node, NodeId, Op};
 
 /// Run the egglog optimizer on the graph rooted at `root`.
@@ -83,7 +83,8 @@ pub fn optimize(graph: &Graph, root: NodeId) -> (Graph, NodeId) {
     let extracted = outputs[0].to_string();
 
     // 5. Parse the extracted term back into a new Graph.
-    let (new_graph, new_root) = parse_egglog_term(graph, &extracted);
+    let root_dtype = graph.node(root).dtype;
+    let (new_graph, new_root) = parse_egglog_term(graph, &extracted, root_dtype);
 
     (new_graph, new_root)
 }
@@ -93,7 +94,7 @@ fn node_to_egglog(graph: &Graph, id: NodeId) -> String {
     let node = graph.node(id);
     match &node.op {
         Op::Load => format!("(tLoad {})", id.0),
-        Op::Const(v) => format!("(tConst {:.1})", *v as f64),
+        Op::Const(v) => format!("(tConst {:.1})", v.to_f64()),
         Op::Add => format!(
             "(tAdd {} {})",
             node_to_egglog(graph, node.inputs[0]),
@@ -139,26 +140,22 @@ fn node_to_egglog(graph: &Graph, id: NodeId) -> String {
 
 /// Parse an egglog extracted term back into a Graph.
 /// Reuses Load buffers from the original graph.
-fn parse_egglog_term(original: &Graph, term: &str) -> (Graph, NodeId) {
+fn parse_egglog_term(original: &Graph, term: &str, root_dtype: DType) -> (Graph, NodeId) {
     let term = term.trim();
     let mut graph = Graph::new();
-    let root = parse_sexpr(original, term, &mut graph);
+    let root = parse_sexpr(original, term, &mut graph, root_dtype);
     (graph, root)
 }
 
 /// Recursive s-expression parser for egglog output.
-fn parse_sexpr(original: &Graph, s: &str, graph: &mut Graph) -> NodeId {
+fn parse_sexpr(original: &Graph, s: &str, graph: &mut Graph, dtype: DType) -> NodeId {
     let s = s.trim();
 
-    // Not an s-expression — should be a bare token (shouldn't happen at top level).
     if !s.starts_with('(') {
         panic!("Expected s-expression, got: {}", s);
     }
 
-    // Strip outer parens.
     let inner = &s[1..s.len() - 1];
-
-    // Split into head and args.
     let (head, rest) = split_head(inner);
 
     match head {
@@ -175,20 +172,19 @@ fn parse_sexpr(original: &Graph, s: &str, graph: &mut Graph) -> NodeId {
         }
         "tConst" => {
             let val: f64 = rest.trim().parse().unwrap();
-            // Infer shape from context — for now use [1] for scalar constants.
-            // The JIT handles Const nodes inline (f32const), so shape doesn't matter for codegen.
+            let scalar = Scalar::from_f64(val, dtype);
             graph.add_node(Node {
-                op: Op::Const(val as f32),
+                op: Op::Const(scalar),
                 inputs: vec![],
                 shape: vec![1],
-                dtype: DType::F32,
+                dtype,
                 buffer: None,
             })
         }
         "tAdd" | "tSub" | "tMul" | "tDiv" => {
             let (arg1_str, arg2_str) = split_two_args(rest);
-            let lhs = parse_sexpr(original, arg1_str, graph);
-            let rhs = parse_sexpr(original, arg2_str, graph);
+            let lhs = parse_sexpr(original, arg1_str, graph, dtype);
+            let rhs = parse_sexpr(original, arg2_str, graph, dtype);
             let op = match head {
                 "tAdd" => Op::Add,
                 "tSub" => Op::Sub,
@@ -201,12 +197,12 @@ fn parse_sexpr(original: &Graph, s: &str, graph: &mut Graph) -> NodeId {
                 op,
                 inputs: vec![lhs, rhs],
                 shape,
-                dtype: DType::F32,
+                dtype,
                 buffer: None,
             })
         }
         "tExp" | "tLn" | "tSqrt" | "tNeg" => {
-            let arg = parse_sexpr(original, rest.trim(), graph);
+            let arg = parse_sexpr(original, rest.trim(), graph, dtype);
             let op = match head {
                 "tExp" => Op::Exp,
                 "tLn" => Op::Ln,
@@ -219,13 +215,11 @@ fn parse_sexpr(original: &Graph, s: &str, graph: &mut Graph) -> NodeId {
                 op,
                 inputs: vec![arg],
                 shape,
-                dtype: DType::F32,
+                dtype,
                 buffer: None,
             })
         }
         _ => {
-            // Be conservative for any unknown extracted term:
-            // materialize it as an opaque load by reusing original root buffer.
             let orig_node = original.node(NodeId(0));
             graph.add_node(Node {
                 op: Op::Load,

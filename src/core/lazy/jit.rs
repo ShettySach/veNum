@@ -6,6 +6,7 @@ use cranelift_module::{Linkage, Module};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
+use super::dtype::{DType, Scalar};
 use super::graph::{Graph, NodeId, Op};
 use super::schedule::FusedKernel;
 use super::shape_tracker::ShapeTracker;
@@ -25,9 +26,10 @@ impl KernelSignature {
     pub fn from_kernel(graph: &Graph, kernel: &FusedKernel) -> Self {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
 
-        // Hash output shape and numel.
+        // Hash output shape, numel, and dtype.
         kernel.output_shape.hash(&mut hasher);
         kernel.numel.hash(&mut hasher);
+        graph.node(kernel.root).dtype.hash(&mut hasher);
 
         // Build input_index the same way compile_kernel does.
         let mut input_index: HashMap<NodeId, usize> = HashMap::new();
@@ -64,7 +66,7 @@ fn hash_expr(
     std::mem::discriminant(&node.op).hash(hasher);
 
     match &node.op {
-        Op::Const(v) => v.to_bits().hash(hasher),
+        Op::Const(v) => v.hash(hasher),
         Op::Load => {
             // Leaf — hash its input index and any tracker.
             let resolved = source_map.get(&id).copied().unwrap_or(id);
@@ -128,91 +130,85 @@ extern "C" fn jit_expf(x: f32) -> f32 {
 extern "C" fn jit_logf(x: f32) -> f32 {
     x.ln()
 }
+extern "C" fn jit_exp(x: f64) -> f64 {
+    x.exp()
+}
+extern "C" fn jit_log(x: f64) -> f64 {
+    x.ln()
+}
+
 impl CompiledKernel {
     /// Execute the kernel with the given input buffer pointers and output pointer.
     ///
     /// # Safety
-    /// - All pointers must be valid and point to buffers of at least `numel` f32 elements.
+    /// - All pointers must be valid and point to buffers of sufficient size.
     /// - `inputs` must have exactly `self.num_inputs` elements.
-    pub unsafe fn execute(&self, inputs: &[*const f32], output: *mut f32, numel: usize) {
-        // ABI: fn(in0: *const f32, in1: *const f32, ..., out: *mut f32, n: u64)
+    pub unsafe fn execute(&self, inputs: &[*const u8], output: *mut u8, numel: usize) {
+        // ABI: fn(in0: *const u8, in1: *const u8, ..., out: *mut u8, n: u64)
+        // All pointer types have the same ABI representation.
         match self.num_inputs {
             0 => {
-                let f: extern "C" fn(*mut f32, u64) = std::mem::transmute(self.fn_ptr);
+                let f: extern "C" fn(*mut u8, u64) = std::mem::transmute(self.fn_ptr);
                 f(output, numel as u64);
             }
             1 => {
-                let f: extern "C" fn(*const f32, *mut f32, u64) = std::mem::transmute(self.fn_ptr);
+                let f: extern "C" fn(*const u8, *mut u8, u64) =
+                    std::mem::transmute(self.fn_ptr);
                 f(inputs[0], output, numel as u64);
             }
             2 => {
-                let f: extern "C" fn(*const f32, *const f32, *mut f32, u64) =
+                let f: extern "C" fn(*const u8, *const u8, *mut u8, u64) =
                     std::mem::transmute(self.fn_ptr);
                 f(inputs[0], inputs[1], output, numel as u64);
             }
             3 => {
-                let f: extern "C" fn(*const f32, *const f32, *const f32, *mut f32, u64) =
+                let f: extern "C" fn(*const u8, *const u8, *const u8, *mut u8, u64) =
                     std::mem::transmute(self.fn_ptr);
                 f(inputs[0], inputs[1], inputs[2], output, numel as u64);
             }
             4 => {
                 let f: extern "C" fn(
-                    *const f32,
-                    *const f32,
-                    *const f32,
-                    *const f32,
-                    *mut f32,
+                    *const u8,
+                    *const u8,
+                    *const u8,
+                    *const u8,
+                    *mut u8,
                     u64,
                 ) = std::mem::transmute(self.fn_ptr);
                 f(
-                    inputs[0],
-                    inputs[1],
-                    inputs[2],
-                    inputs[3],
-                    output,
+                    inputs[0], inputs[1], inputs[2], inputs[3], output,
                     numel as u64,
                 );
             }
             5 => {
                 let f: extern "C" fn(
-                    *const f32,
-                    *const f32,
-                    *const f32,
-                    *const f32,
-                    *const f32,
-                    *mut f32,
+                    *const u8,
+                    *const u8,
+                    *const u8,
+                    *const u8,
+                    *const u8,
+                    *mut u8,
                     u64,
                 ) = std::mem::transmute(self.fn_ptr);
                 f(
-                    inputs[0],
-                    inputs[1],
-                    inputs[2],
-                    inputs[3],
-                    inputs[4],
-                    output,
-                    numel as u64,
+                    inputs[0], inputs[1], inputs[2], inputs[3], inputs[4],
+                    output, numel as u64,
                 );
             }
             6 => {
                 let f: extern "C" fn(
-                    *const f32,
-                    *const f32,
-                    *const f32,
-                    *const f32,
-                    *const f32,
-                    *const f32,
-                    *mut f32,
+                    *const u8,
+                    *const u8,
+                    *const u8,
+                    *const u8,
+                    *const u8,
+                    *const u8,
+                    *mut u8,
                     u64,
                 ) = std::mem::transmute(self.fn_ptr);
                 f(
-                    inputs[0],
-                    inputs[1],
-                    inputs[2],
-                    inputs[3],
-                    inputs[4],
-                    inputs[5],
-                    output,
-                    numel as u64,
+                    inputs[0], inputs[1], inputs[2], inputs[3], inputs[4],
+                    inputs[5], output, numel as u64,
                 );
             }
             _ => {
@@ -222,6 +218,16 @@ impl CompiledKernel {
                 );
             }
         }
+    }
+}
+
+/// Map a DType to the corresponding Cranelift IR type.
+fn dtype_to_cl_type(dtype: DType) -> types::Type {
+    match dtype {
+        DType::F32 => types::F32,
+        DType::F64 => types::F64,
+        DType::I32 => types::I32,
+        DType::I64 => types::I64,
     }
 }
 
@@ -236,6 +242,9 @@ pub fn compile_kernel(
 ) -> Result<CompiledKernel> {
     let num_inputs = kernel.input_buffers.len();
     let has_trackers = !kernel.input_trackers.is_empty();
+    let dtype = graph.node(kernel.root).dtype;
+    let cl_type = dtype_to_cl_type(dtype);
+    let elem_size = dtype.size_bytes() as i64;
 
     // Map each input buffer NodeId to its parameter index.
     let mut input_index: HashMap<NodeId, usize> = HashMap::new();
@@ -257,19 +266,27 @@ pub fn compile_kernel(
     // Register math symbols.
     builder.symbol("jit_expf", jit_expf as *const u8);
     builder.symbol("jit_logf", jit_logf as *const u8);
+    builder.symbol("jit_exp", jit_exp as *const u8);
+    builder.symbol("jit_log", jit_log as *const u8);
     let mut module = JITModule::new(builder);
     let ptr_type = module.target_config().pointer_type();
 
     // --- Declare math function signatures ---
-    let mut math_sig = module.make_signature();
-    math_sig.params.push(AbiParam::new(types::F32));
-    math_sig.returns.push(AbiParam::new(types::F32));
+    let mut math_sig_f32 = module.make_signature();
+    math_sig_f32.params.push(AbiParam::new(types::F32));
+    math_sig_f32.returns.push(AbiParam::new(types::F32));
 
-    let expf_id = module.declare_function("jit_expf", Linkage::Import, &math_sig)?;
-    let logf_id = module.declare_function("jit_logf", Linkage::Import, &math_sig)?;
+    let mut math_sig_f64 = module.make_signature();
+    math_sig_f64.params.push(AbiParam::new(types::F64));
+    math_sig_f64.returns.push(AbiParam::new(types::F64));
+
+    let expf_id = module.declare_function("jit_expf", Linkage::Import, &math_sig_f32)?;
+    let logf_id = module.declare_function("jit_logf", Linkage::Import, &math_sig_f32)?;
+    let exp_id = module.declare_function("jit_exp", Linkage::Import, &math_sig_f64)?;
+    let log_id = module.declare_function("jit_log", Linkage::Import, &math_sig_f64)?;
 
     // --- Build kernel function signature ---
-    // fn(in0: *f32, in1: *f32, ..., out: *mut f32, n: u64)
+    // fn(in0: *u8, in1: *u8, ..., out: *mut u8, n: u64)
     let mut sig = module.make_signature();
     for _ in 0..num_inputs {
         sig.params.push(AbiParam::new(ptr_type));
@@ -289,6 +306,8 @@ pub fn compile_kernel(
     // Declare references to math functions.
     let expf_ref = module.declare_func_in_func(expf_id, builder.func);
     let logf_ref = module.declare_func_in_func(logf_id, builder.func);
+    let exp_ref = module.declare_func_in_func(exp_id, builder.func);
+    let log_ref = module.declare_func_in_func(log_id, builder.func);
 
     let entry_block = builder.create_block();
     builder.append_block_params_for_function_params(entry_block);
@@ -321,9 +340,9 @@ pub fn compile_kernel(
     builder.switch_to_block(loop_body);
     builder.seal_block(loop_body);
 
-    // Byte offset for output = i * 4.
-    let four = builder.ins().iconst(types::I64, 4);
-    let byte_offset = builder.ins().imul(i, four);
+    // Byte offset for output = i * elem_size.
+    let elem_size_val = builder.ins().iconst(types::I64, elem_size);
+    let byte_offset = builder.ins().imul(i, elem_size_val);
 
     // If we have trackers, decompose flat index `i` into multi-dim indices.
     let dim_indices = if has_trackers {
@@ -336,7 +355,8 @@ pub fn compile_kernel(
     let mut tracked_byte_offsets: HashMap<NodeId, Value> = HashMap::new();
     if let Some(ref dims) = dim_indices {
         for (&buf_id, tracker) in &kernel.input_trackers {
-            let tracked_offset = compute_tracker_byte_offset(&mut builder, dims, tracker);
+            let tracked_offset =
+                compute_tracker_byte_offset(&mut builder, dims, tracker, elem_size);
             tracked_byte_offsets.insert(buf_id, tracked_offset);
         }
     }
@@ -344,6 +364,8 @@ pub fn compile_kernel(
     let math_refs = MathFuncRefs {
         expf: expf_ref,
         logf: logf_ref,
+        exp: exp_ref,
+        log: log_ref,
     };
 
     let result = build_expression(
@@ -356,6 +378,8 @@ pub fn compile_kernel(
         &math_refs,
         &tracked_byte_offsets,
         &kernel.shape_source_map,
+        dtype,
+        cl_type,
     )?;
 
     // Store result to out[i]
@@ -429,11 +453,12 @@ fn decompose_flat_index(
 /// Compute the byte offset into a source buffer using a ShapeTracker.
 ///
 /// flat_offset = sum(dim_indices[d] * strides[d]) + offset
-/// byte_offset = flat_offset * 4
+/// byte_offset = flat_offset * elem_size
 fn compute_tracker_byte_offset(
     builder: &mut FunctionBuilder,
     dim_indices: &[Value],
     tracker: &ShapeTracker,
+    elem_size: i64,
 ) -> Value {
     let mut sum = builder.ins().iconst(types::I64, tracker.offset as i64);
 
@@ -450,13 +475,15 @@ fn compute_tracker_byte_offset(
         sum = builder.ins().iadd(sum, contribution);
     }
 
-    let four = builder.ins().iconst(types::I64, 4);
-    builder.ins().imul(sum, four)
+    let size_val = builder.ins().iconst(types::I64, elem_size);
+    builder.ins().imul(sum, size_val)
 }
 
 struct MathFuncRefs {
     expf: cranelift_codegen::ir::FuncRef,
     logf: cranelift_codegen::ir::FuncRef,
+    exp: cranelift_codegen::ir::FuncRef,
+    log: cranelift_codegen::ir::FuncRef,
 }
 
 /// Recursively build the Cranelift IR for the expression tree rooted at `id`.
@@ -470,12 +497,13 @@ fn build_expression(
     math: &MathFuncRefs,
     tracked_byte_offsets: &HashMap<NodeId, Value>,
     shape_source_map: &HashMap<NodeId, NodeId>,
+    dtype: DType,
+    cl_type: types::Type,
 ) -> Result<Value> {
     let node = graph.node(id);
 
     match &node.op {
         op if !op.is_elementwise() && !matches!(op, Op::Const(_)) => {
-            // If this is an inlined shape op, resolve to its source buffer.
             let resolved_id = shape_source_map.get(&id).copied().unwrap_or(id);
             let idx = input_index
                 .get(&resolved_id)
@@ -486,7 +514,7 @@ fn build_expression(
                 .copied()
                 .unwrap_or(byte_offset);
             let addr = builder.ins().iadd(ptr, offset);
-            Ok(builder.ins().load(types::F32, MemFlags::new(), addr, 0))
+            Ok(builder.ins().load(cl_type, MemFlags::new(), addr, 0))
         }
         Op::Load => {
             let idx = input_index
@@ -498,96 +526,82 @@ fn build_expression(
                 .copied()
                 .unwrap_or(byte_offset);
             let addr = builder.ins().iadd(ptr, offset);
-            Ok(builder.ins().load(types::F32, MemFlags::new(), addr, 0))
+            Ok(builder.ins().load(cl_type, MemFlags::new(), addr, 0))
         }
-        Op::Const(val) => Ok(builder.ins().f32const(*val)),
+        Op::Const(scalar) => emit_const(builder, *scalar, dtype),
         Op::Add | Op::Sub | Op::Mul | Op::Div => {
             let lhs = build_expression(
-                graph,
-                node.inputs[0],
-                builder,
-                input_ptrs,
-                input_index,
-                byte_offset,
-                math,
-                tracked_byte_offsets,
-                shape_source_map,
+                graph, node.inputs[0], builder, input_ptrs, input_index,
+                byte_offset, math, tracked_byte_offsets, shape_source_map,
+                dtype, cl_type,
             )?;
             let rhs = build_expression(
-                graph,
-                node.inputs[1],
-                builder,
-                input_ptrs,
-                input_index,
-                byte_offset,
-                math,
-                tracked_byte_offsets,
-                shape_source_map,
+                graph, node.inputs[1], builder, input_ptrs, input_index,
+                byte_offset, math, tracked_byte_offsets, shape_source_map,
+                dtype, cl_type,
             )?;
-            Ok(match node.op {
-                Op::Add => builder.ins().fadd(lhs, rhs),
-                Op::Sub => builder.ins().fsub(lhs, rhs),
-                Op::Mul => builder.ins().fmul(lhs, rhs),
-                Op::Div => builder.ins().fdiv(lhs, rhs),
+            Ok(match (node.op.clone(), dtype.is_float()) {
+                (Op::Add, true) => builder.ins().fadd(lhs, rhs),
+                (Op::Sub, true) => builder.ins().fsub(lhs, rhs),
+                (Op::Mul, true) => builder.ins().fmul(lhs, rhs),
+                (Op::Div, true) => builder.ins().fdiv(lhs, rhs),
+                (Op::Add, false) => builder.ins().iadd(lhs, rhs),
+                (Op::Sub, false) => builder.ins().isub(lhs, rhs),
+                (Op::Mul, false) => builder.ins().imul(lhs, rhs),
+                (Op::Div, false) => builder.ins().sdiv(lhs, rhs),
                 _ => unreachable!(),
             })
         }
         Op::Neg => {
             let val = build_expression(
-                graph,
-                node.inputs[0],
-                builder,
-                input_ptrs,
-                input_index,
-                byte_offset,
-                math,
-                tracked_byte_offsets,
-                shape_source_map,
+                graph, node.inputs[0], builder, input_ptrs, input_index,
+                byte_offset, math, tracked_byte_offsets, shape_source_map,
+                dtype, cl_type,
             )?;
-            Ok(builder.ins().fneg(val))
+            if dtype.is_float() {
+                Ok(builder.ins().fneg(val))
+            } else {
+                let zero = builder.ins().iconst(cl_type, 0);
+                Ok(builder.ins().isub(zero, val))
+            }
         }
         Op::Exp => {
             let val = build_expression(
-                graph,
-                node.inputs[0],
-                builder,
-                input_ptrs,
-                input_index,
-                byte_offset,
-                math,
-                tracked_byte_offsets,
-                shape_source_map,
+                graph, node.inputs[0], builder, input_ptrs, input_index,
+                byte_offset, math, tracked_byte_offsets, shape_source_map,
+                dtype, cl_type,
             )?;
-            let call = builder.ins().call(math.expf, &[val]);
+            let func_ref = match dtype {
+                DType::F32 => math.expf,
+                DType::F64 => math.exp,
+                _ => return Err(anyhow::anyhow!("exp not supported for {:?}", dtype)),
+            };
+            let call = builder.ins().call(func_ref, &[val]);
             Ok(builder.inst_results(call)[0])
         }
         Op::Ln => {
             let val = build_expression(
-                graph,
-                node.inputs[0],
-                builder,
-                input_ptrs,
-                input_index,
-                byte_offset,
-                math,
-                tracked_byte_offsets,
-                shape_source_map,
+                graph, node.inputs[0], builder, input_ptrs, input_index,
+                byte_offset, math, tracked_byte_offsets, shape_source_map,
+                dtype, cl_type,
             )?;
-            let call = builder.ins().call(math.logf, &[val]);
+            let func_ref = match dtype {
+                DType::F32 => math.logf,
+                DType::F64 => math.log,
+                _ => return Err(anyhow::anyhow!("ln not supported for {:?}", dtype)),
+            };
+            let call = builder.ins().call(func_ref, &[val]);
             Ok(builder.inst_results(call)[0])
         }
         Op::Sqrt => {
             let val = build_expression(
-                graph,
-                node.inputs[0],
-                builder,
-                input_ptrs,
-                input_index,
-                byte_offset,
-                math,
-                tracked_byte_offsets,
-                shape_source_map,
+                graph, node.inputs[0], builder, input_ptrs, input_index,
+                byte_offset, math, tracked_byte_offsets, shape_source_map,
+                dtype, cl_type,
             )?;
+            if !dtype.is_float() {
+                return Err(anyhow::anyhow!("sqrt not supported for {:?}", dtype));
+            }
             Ok(builder.ins().sqrt(val))
         }
         _ => Err(anyhow::anyhow!(
@@ -596,4 +610,24 @@ fn build_expression(
             node.op
         )),
     }
+}
+
+/// Emit a constant value instruction for the given Scalar and DType.
+fn emit_const(builder: &mut FunctionBuilder, scalar: Scalar, dtype: DType) -> Result<Value> {
+    Ok(match (scalar, dtype) {
+        (Scalar::F32(v), DType::F32) => builder.ins().f32const(v),
+        (Scalar::F64(v), DType::F64) => builder.ins().f64const(v),
+        (Scalar::I32(v), DType::I32) => builder.ins().iconst(types::I32, v as i64),
+        (Scalar::I64(v), DType::I64) => builder.ins().iconst(types::I64, v),
+        // Cross-dtype const (e.g. Scalar::F32 used in I32 kernel) — convert
+        _ => {
+            let v = scalar.to_f64();
+            match dtype {
+                DType::F32 => builder.ins().f32const(v as f32),
+                DType::F64 => builder.ins().f64const(v),
+                DType::I32 => builder.ins().iconst(types::I32, v as i64),
+                DType::I64 => builder.ins().iconst(types::I64, v as i64),
+            }
+        }
+    })
 }

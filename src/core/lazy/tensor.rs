@@ -1,5 +1,6 @@
 use super::{
     context::{Context, KernelCache},
+    dtype::{Buffer, DType, RealizedTensor, Scalar},
     graph::{Graph, NodeId, Op},
     jit::{compile_kernel, KernelSignature},
     optimize, render,
@@ -8,7 +9,6 @@ use super::{
 use crate::core::{
     errors::{ExpansionError, ReshapeError, TransposeError, UnsqueezeError},
     iters::Indexer,
-    naive::NaiveTensor,
 };
 use anyhow::{anyhow, bail, Result};
 use std::{cmp::Ordering, sync::Arc};
@@ -19,6 +19,7 @@ pub struct Tensor {
     kernel_cache: KernelCache,
     id: NodeId,
     shape: Vec<usize>,
+    dtype: DType,
 }
 
 impl Tensor {
@@ -32,22 +33,79 @@ impl Tensor {
             kernel_cache: Arc::clone(&self.kernel_cache),
             id,
             shape,
+            dtype: self.dtype,
         }
     }
 
     pub fn from_slice(cx: &Context, data: &[f32], shape: Vec<usize>) -> Self {
-        let data = Arc::new(data.to_vec());
+        let buffer = Buffer::from_f32_vec(data.to_vec());
         let graph = cx.graph();
-        let id = graph.lock().unwrap().load(data, shape.clone());
+        let id = graph.lock().unwrap().load(buffer, shape.clone());
         Self {
             graph,
             kernel_cache: cx.kernel_cache(),
             id,
             shape,
+            dtype: DType::F32,
+        }
+    }
+
+    pub fn from_slice_f64(cx: &Context, data: &[f64], shape: Vec<usize>) -> Self {
+        let buffer = Buffer::from_f64_vec(data.to_vec());
+        let graph = cx.graph();
+        let id = graph.lock().unwrap().load(buffer, shape.clone());
+        Self {
+            graph,
+            kernel_cache: cx.kernel_cache(),
+            id,
+            shape,
+            dtype: DType::F64,
+        }
+    }
+
+    pub fn from_slice_i32(cx: &Context, data: &[i32], shape: Vec<usize>) -> Self {
+        let buffer = Buffer::from_i32_vec(data.to_vec());
+        let graph = cx.graph();
+        let id = graph.lock().unwrap().load(buffer, shape.clone());
+        Self {
+            graph,
+            kernel_cache: cx.kernel_cache(),
+            id,
+            shape,
+            dtype: DType::I32,
+        }
+    }
+
+    pub fn from_slice_i64(cx: &Context, data: &[i64], shape: Vec<usize>) -> Self {
+        let buffer = Buffer::from_i64_vec(data.to_vec());
+        let graph = cx.graph();
+        let id = graph.lock().unwrap().load(buffer, shape.clone());
+        Self {
+            graph,
+            kernel_cache: cx.kernel_cache(),
+            id,
+            shape,
+            dtype: DType::I64,
         }
     }
 
     pub fn constant(cx: &Context, value: f32, shape: Vec<usize>) -> Self {
+        let graph = cx.graph();
+        let id = graph
+            .lock()
+            .unwrap()
+            .constant(Scalar::F32(value), shape.clone());
+        Self {
+            graph,
+            kernel_cache: cx.kernel_cache(),
+            id,
+            shape,
+            dtype: DType::F32,
+        }
+    }
+
+    pub fn constant_scalar(cx: &Context, value: Scalar, shape: Vec<usize>) -> Self {
+        let dtype = value.dtype();
         let graph = cx.graph();
         let id = graph.lock().unwrap().constant(value, shape.clone());
         Self {
@@ -55,13 +113,13 @@ impl Tensor {
             kernel_cache: cx.kernel_cache(),
             id,
             shape,
+            dtype,
         }
     }
 
     pub fn arange(cx: &Context, start: f32, end: f32, step: f32) -> anyhow::Result<Self> {
         use std::cmp::Ordering;
 
-        // Validate parameters (same logic as NaiveTensor)
         let ascending = match step
             .partial_cmp(&0.0)
             .ok_or(anyhow::anyhow!("Cannot compare step value"))?
@@ -73,7 +131,6 @@ impl Tensor {
             Ordering::Equal => Err(anyhow::anyhow!("step cannot be zero")),
         }?;
 
-        // Generate the data
         let mut data = Vec::new();
         let mut curr = start;
         while (ascending && curr < end) || (!ascending && curr > end) {
@@ -89,19 +146,29 @@ impl Tensor {
         &self.shape
     }
 
+    pub fn dtype(&self) -> DType {
+        self.dtype
+    }
+
     pub fn numel(&self) -> usize {
         self.shape.iter().product()
     }
 
     // -------- elementwise lazy ops --------
 
-    fn binary_op(&self, rhs: &Tensor, op: Op) -> Tensor {
-        debug_assert!(
-            Arc::ptr_eq(&self.graph, &rhs.graph),
-            "binary_op requires both tensors to share the same Context"
-        );
+    fn binary_op(&self, rhs: &Tensor, op: Op) -> Result<Tensor> {
+        if !Arc::ptr_eq(&self.graph, &rhs.graph) {
+            bail!("binary_op requires both tensors to share the same Context");
+        }
+        if self.dtype != rhs.dtype {
+            bail!(
+                "binary_op requires matching dtypes, got {:?} and {:?}",
+                self.dtype,
+                rhs.dtype
+            );
+        }
         let id = self.with_graph_mut(|g| g.binary(op, self.id, rhs.id));
-        self.derived(id, self.shape.clone())
+        Ok(self.derived(id, self.shape.clone()))
     }
 
     fn unary_op(&self, op: Op) -> Tensor {
@@ -109,16 +176,25 @@ impl Tensor {
         self.derived(id, self.shape.clone())
     }
 
-    pub fn exp(&self) -> Tensor {
-        self.unary_op(Op::Exp)
+    pub fn exp(&self) -> Result<Tensor> {
+        if !self.dtype.is_float() {
+            bail!("exp requires float dtype, got {:?}", self.dtype);
+        }
+        Ok(self.unary_op(Op::Exp))
     }
 
-    pub fn ln(&self) -> Tensor {
-        self.unary_op(Op::Ln)
+    pub fn ln(&self) -> Result<Tensor> {
+        if !self.dtype.is_float() {
+            bail!("ln requires float dtype, got {:?}", self.dtype);
+        }
+        Ok(self.unary_op(Op::Ln))
     }
 
-    pub fn sqrt(&self) -> Tensor {
-        self.unary_op(Op::Sqrt)
+    pub fn sqrt(&self) -> Result<Tensor> {
+        if !self.dtype.is_float() {
+            bail!("sqrt requires float dtype, got {:?}", self.dtype);
+        }
+        Ok(self.unary_op(Op::Sqrt))
     }
 
     pub fn neg(&self) -> Tensor {
@@ -201,11 +277,11 @@ impl Tensor {
 
     pub fn slice(&self, ranges: Vec<(usize, usize)>) -> Result<Tensor> {
         if ranges.len() != self.shape.len() {
-            bail!(anyhow!(
+            bail!(
                 "slice ranges rank mismatch: got {}, expected {}",
                 ranges.len(),
                 self.shape.len()
-            ));
+            );
         }
 
         let mut out = Vec::with_capacity(self.shape.len());
@@ -213,12 +289,12 @@ impl Tensor {
             let size = self.shape[dim];
             let end = if end_raw == 0 { size } else { end_raw };
             if start > end || end > size {
-                bail!(anyhow!(
+                bail!(
                     "slice range {:?} out of bounds for dim {} with size {}",
                     (start, end),
                     dim,
                     size
-                ));
+                );
             }
             out.push(end - start);
         }
@@ -230,11 +306,11 @@ impl Tensor {
     pub fn flip(&self, flips: Vec<usize>) -> Result<Tensor> {
         for &d in &flips {
             if d >= self.shape.len() {
-                bail!(anyhow!(
+                bail!(
                     "flip dimension {} out of bounds for rank {}",
                     d,
                     self.shape.len()
-                ));
+                );
             }
         }
 
@@ -273,6 +349,10 @@ impl Tensor {
     }
 
     pub fn pad(&self, constant: f32, padding: Vec<(usize, usize)>) -> Result<Tensor> {
+        self.pad_scalar(Scalar::F32(constant), padding)
+    }
+
+    pub fn pad_scalar(&self, constant: Scalar, padding: Vec<(usize, usize)>) -> Result<Tensor> {
         let mut pad = padding;
         pad.resize(self.shape.len(), (0, 0));
 
@@ -381,7 +461,7 @@ impl Tensor {
         let rhs = rhs.reshape(b_rs)?.expand(b_exp)?;
 
         // elementwise mul then sum-reduce over K
-        (&lhs * &rhs).sum_dims(vec![blen + 1], false)
+        (&lhs * &rhs)?.sum_dims(vec![blen + 1], false)
     }
 
     // -------- visualization --------
@@ -494,16 +574,16 @@ impl Tensor {
 
     // -------- realize --------
 
-    pub fn realize(&self) -> Result<NaiveTensor<f32>> {
+    pub fn realize(&self) -> Result<RealizedTensor> {
         let graph = self.graph.lock().unwrap();
 
         // Fast path: already-backed leaf.
         let root_node = graph.node(self.id);
         if let Some(ref buffer) = root_node.buffer {
-            let data = buffer.as_f32();
-            let shape = root_node.shape.clone();
-            // drop(graph);
-            return NaiveTensor::new(data, &shape);
+            return Ok(RealizedTensor::new(
+                buffer.clone(),
+                root_node.shape.clone(),
+            ));
         }
 
         // Only optimize pure elementwise roots for now.
@@ -520,20 +600,25 @@ impl Tensor {
 
         let root_node = graph.node(root);
         if let Some(ref buffer) = root_node.buffer {
-            return NaiveTensor::new(buffer.as_f32(), &root_node.shape);
+            return Ok(RealizedTensor::new(
+                buffer.clone(),
+                root_node.shape.clone(),
+            ));
         }
         if let Op::Const(val) = root_node.op {
             let numel: usize = self.shape.iter().product();
-            return NaiveTensor::new(&vec![val; numel], &self.shape);
+            let buffer = scalar_fill_buffer(val, numel);
+            return Ok(RealizedTensor::new(buffer, self.shape.clone()));
         }
 
         let schedule = build_schedule(graph, root);
-        let mut realized: std::collections::HashMap<NodeId, Vec<f32>> =
+        let mut realized: std::collections::HashMap<NodeId, Buffer> =
             std::collections::HashMap::new();
 
         for item in &schedule {
             match item {
                 ScheduleItem::Fused(kernel) => {
+                    let dtype = graph.node(kernel.root).dtype;
                     let sig = KernelSignature::from_kernel(graph, kernel);
                     let compiled = {
                         let mut cache = self.kernel_cache.lock().unwrap();
@@ -546,93 +631,210 @@ impl Tensor {
                         }
                     };
 
-                    let input_ptrs: Vec<*const f32> = kernel
+                    let input_ptrs: Vec<*const u8> = kernel
                         .input_buffers
                         .iter()
-                        .map(|&buf_id| {
+                        .map(|&buf_id| -> Result<*const u8> {
                             let node = graph.node(buf_id);
                             if let Some(ref buffer) = node.buffer {
-                                buffer.as_f32_ptr()
-                            } else if let Some(data) = realized.get(&buf_id) {
-                                data.as_ptr()
+                                Ok(buffer.as_ptr_u8())
+                            } else if let Some(buf) = realized.get(&buf_id) {
+                                Ok(buf.as_ptr_u8())
                             } else {
-                                panic!("Input buffer {:?} not realized and has no data", buf_id);
+                                bail!("Input buffer {:?} not realized and has no data", buf_id);
                             }
                         })
-                        .collect();
+                        .collect::<Result<Vec<_>>>()?;
 
-                    let mut output = vec![0.0f32; kernel.numel];
+                    let mut output_bytes =
+                        super::dtype::zeros(dtype, kernel.numel);
                     unsafe {
-                        compiled.execute(&input_ptrs, output.as_mut_ptr(), kernel.numel);
+                        compiled.execute(
+                            &input_ptrs,
+                            output_bytes.as_mut_ptr(),
+                            kernel.numel,
+                        );
                     }
-                    realized.insert(kernel.root, output);
+                    realized.insert(kernel.root, buffer_from_bytes(output_bytes, dtype));
                 }
                 ScheduleItem::Shape(shape_item) => {
                     let input_node = graph.node(shape_item.input);
                     let input_shape = &input_node.shape;
+                    let dtype = input_node.dtype;
 
-                    let output = {
-                        let input_data: &[f32] =
-                            if let Some(data) = realized.get(&shape_item.input) {
-                                data
-                            } else if let Some(ref buf) = input_node.buffer {
-                                buf.as_f32()
-                            } else {
-                                bail!("Shape op input {:?} is not realized", shape_item.input);
-                            };
-                        execute_shape_op(
-                            &shape_item.op,
-                            input_data,
-                            input_shape,
-                            &shape_item.shape,
-                        )?
-                    };
+                    let input_buf = get_realized_buffer(
+                        graph,
+                        shape_item.input,
+                        &realized,
+                        "Shape op",
+                    )?;
+                    let output = execute_shape_op_typed(
+                        &shape_item.op,
+                        &input_buf,
+                        input_shape,
+                        &shape_item.shape,
+                        dtype,
+                    )?;
                     realized.insert(shape_item.root, output);
                 }
                 ScheduleItem::Reduce(reduce_item) => {
                     let input_node = graph.node(reduce_item.input);
                     let input_shape = &input_node.shape;
+                    let dtype = input_node.dtype;
 
-                    let output = {
-                        let input_data: &[f32] =
-                            if let Some(data) = realized.get(&reduce_item.input) {
-                                data
-                            } else if let Some(ref buf) = input_node.buffer {
-                                buf.as_f32()
-                            } else {
-                                bail!(
-                                    "Reduce op input {:?} is not realized",
-                                    reduce_item.input
-                                );
-                            };
-                        execute_reduce_op(
-                            &reduce_item.op,
-                            input_data,
-                            input_shape,
-                            &reduce_item.shape,
-                        )?
-                    };
+                    let input_buf = get_realized_buffer(
+                        graph,
+                        reduce_item.input,
+                        &realized,
+                        "Reduce op",
+                    )?;
+                    let output = execute_reduce_op_typed(
+                        &reduce_item.op,
+                        &input_buf,
+                        input_shape,
+                        &reduce_item.shape,
+                        dtype,
+                    )?;
                     realized.insert(reduce_item.root, output);
                 }
             }
         }
 
-        let data = realized
+        let buf = realized
             .remove(&root)
             .ok_or_else(|| anyhow!("Root node was not realized"))?;
 
-        NaiveTensor::new(&data, &graph.node(root).shape)
+        Ok(RealizedTensor::new(buf, graph.node(root).shape.clone()))
     }
 }
 
-// -------- shape-op execution helpers --------
+fn get_realized_buffer<'a>(
+    graph: &'a Graph,
+    node_id: NodeId,
+    realized: &'a std::collections::HashMap<NodeId, Buffer>,
+    context: &str,
+) -> Result<std::borrow::Cow<'a, Buffer>> {
+    if let Some(buf) = realized.get(&node_id) {
+        Ok(std::borrow::Cow::Borrowed(buf))
+    } else if let Some(ref buf) = graph.node(node_id).buffer {
+        Ok(std::borrow::Cow::Borrowed(buf))
+    } else {
+        bail!("{} input {:?} is not realized", context, node_id);
+    }
+}
 
-fn execute_shape_op(
+fn scalar_fill_buffer(val: Scalar, numel: usize) -> Buffer {
+    match val {
+        Scalar::F32(v) => Buffer::from_f32_vec(vec![v; numel]),
+        Scalar::F64(v) => Buffer::from_f64_vec(vec![v; numel]),
+        Scalar::I32(v) => Buffer::from_i32_vec(vec![v; numel]),
+        Scalar::I64(v) => Buffer::from_i64_vec(vec![v; numel]),
+    }
+}
+
+fn buffer_from_bytes(bytes: Vec<u8>, dtype: DType) -> Buffer {
+    match dtype {
+        DType::F32 => {
+            let data: Vec<f32> = bytes
+                .chunks_exact(4)
+                .map(|c| f32::from_ne_bytes(c.try_into().unwrap()))
+                .collect();
+            Buffer::from_f32_vec(data)
+        }
+        DType::F64 => {
+            let data: Vec<f64> = bytes
+                .chunks_exact(8)
+                .map(|c| f64::from_ne_bytes(c.try_into().unwrap()))
+                .collect();
+            Buffer::from_f64_vec(data)
+        }
+        DType::I32 => {
+            let data: Vec<i32> = bytes
+                .chunks_exact(4)
+                .map(|c| i32::from_ne_bytes(c.try_into().unwrap()))
+                .collect();
+            Buffer::from_i32_vec(data)
+        }
+        DType::I64 => {
+            let data: Vec<i64> = bytes
+                .chunks_exact(8)
+                .map(|c| i64::from_ne_bytes(c.try_into().unwrap()))
+                .collect();
+            Buffer::from_i64_vec(data)
+        }
+    }
+}
+
+// -------- dtype-dispatched shape/reduce execution --------
+
+macro_rules! dispatch_shape_op {
+    ($buf:expr, $op:expr, $input_shape:expr, $output_shape:expr, $dtype:expr) => {
+        match $buf {
+            Buffer::F32(v) => {
+                let out = execute_shape_op($op, v, $input_shape, $output_shape)?;
+                Ok(Buffer::from_f32_vec(out))
+            }
+            Buffer::F64(v) => {
+                let out = execute_shape_op($op, v, $input_shape, $output_shape)?;
+                Ok(Buffer::from_f64_vec(out))
+            }
+            Buffer::I32(v) => {
+                let out = execute_shape_op($op, v, $input_shape, $output_shape)?;
+                Ok(Buffer::from_i32_vec(out))
+            }
+            Buffer::I64(v) => {
+                let out = execute_shape_op($op, v, $input_shape, $output_shape)?;
+                Ok(Buffer::from_i64_vec(out))
+            }
+        }
+    };
+}
+
+fn execute_shape_op_typed(
     op: &Op,
-    input_data: &[f32],
+    input_buf: &Buffer,
     input_shape: &[usize],
     output_shape: &[usize],
-) -> Result<Vec<f32>> {
+    _dtype: DType,
+) -> Result<Buffer> {
+    dispatch_shape_op!(input_buf, op, input_shape, output_shape, _dtype)
+}
+
+fn execute_reduce_op_typed(
+    op: &Op,
+    input_buf: &Buffer,
+    input_shape: &[usize],
+    output_shape: &[usize],
+    _dtype: DType,
+) -> Result<Buffer> {
+    match input_buf {
+        Buffer::F32(v) => {
+            let out = execute_reduce_op_f(op, v, input_shape, output_shape)?;
+            Ok(Buffer::from_f32_vec(out))
+        }
+        Buffer::F64(v) => {
+            let out = execute_reduce_op_f(op, v, input_shape, output_shape)?;
+            Ok(Buffer::from_f64_vec(out))
+        }
+        Buffer::I32(v) => {
+            let out = execute_reduce_op_i(op, v, input_shape, output_shape)?;
+            Ok(Buffer::from_i32_vec(out))
+        }
+        Buffer::I64(v) => {
+            let out = execute_reduce_op_i(op, v, input_shape, output_shape)?;
+            Ok(Buffer::from_i64_vec(out))
+        }
+    }
+}
+
+// -------- shape-op execution helpers (generic over Copy types) --------
+
+fn execute_shape_op<T: Copy + Default>(
+    op: &Op,
+    input_data: &[T],
+    input_shape: &[usize],
+    output_shape: &[usize],
+) -> Result<Vec<T>> {
     match op {
         Op::Reshape(_) => execute_reshape(input_data, input_shape, output_shape),
         Op::Permute(perm) => execute_permute(input_data, input_shape, output_shape, perm),
@@ -643,18 +845,40 @@ fn execute_shape_op(
         Op::Squeeze => execute_reshape(input_data, input_shape, output_shape),
         Op::Unsqueeze(_) => execute_reshape(input_data, input_shape, output_shape),
         Op::Pad(constant, padding) => {
-            execute_pad(input_data, input_shape, output_shape, *constant, padding)
+            let fill = scalar_to_typed::<T>(*constant);
+            execute_pad(input_data, input_shape, output_shape, fill, padding)
         }
         _ => bail!("execute_shape_op called with non-shape op: {:?}", op),
     }
 }
 
-fn execute_reduce_op(
+fn scalar_to_typed<T: Copy + Default>(s: Scalar) -> T {
+    // Safety: we know the Scalar variant matches the Buffer variant that called us.
+    // Use byte reinterpretation to avoid needing trait bounds for From.
+    unsafe {
+        let mut val = T::default();
+        let src = match s {
+            Scalar::F32(v) => std::slice::from_raw_parts(&v as *const f32 as *const u8, 4),
+            Scalar::F64(v) => std::slice::from_raw_parts(&v as *const f64 as *const u8, 8),
+            Scalar::I32(v) => std::slice::from_raw_parts(&v as *const i32 as *const u8, 4),
+            Scalar::I64(v) => std::slice::from_raw_parts(&v as *const i64 as *const u8, 8),
+        };
+        let dst = std::slice::from_raw_parts_mut(&mut val as *mut T as *mut u8, std::mem::size_of::<T>());
+        dst.copy_from_slice(src);
+        val
+    }
+}
+
+fn execute_reduce_op_f<T>(
     op: &Op,
-    input_data: &[f32],
+    input_data: &[T],
     input_shape: &[usize],
     output_shape: &[usize],
-) -> Result<Vec<f32>> {
+) -> Result<Vec<T>>
+where
+    T: Copy + Default + std::ops::Add<Output = T> + std::ops::Mul<Output = T> + PartialOrd,
+    T: std::iter::Sum + std::iter::Product,
+{
     match op {
         Op::Sum(dimensions, keepdims) => execute_reduce(
             input_data,
@@ -683,7 +907,7 @@ fn execute_reduce_op(
                     .iter()
                     .copied()
                     .max_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal))
-                    .unwrap_or(0.0)
+                    .unwrap_or(T::default())
             },
         ),
         Op::Min(dimensions, keepdims) => execute_reduce(
@@ -697,21 +921,68 @@ fn execute_reduce_op(
                     .iter()
                     .copied()
                     .min_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal))
-                    .unwrap_or(0.0)
+                    .unwrap_or(T::default())
             },
         ),
         _ => bail!("execute_reduce_op called with non-reduce op: {:?}", op),
     }
 }
 
-fn execute_reduce(
-    input_data: &[f32],
+fn execute_reduce_op_i<T>(
+    op: &Op,
+    input_data: &[T],
+    input_shape: &[usize],
+    output_shape: &[usize],
+) -> Result<Vec<T>>
+where
+    T: Copy + Default + std::ops::Add<Output = T> + std::ops::Mul<Output = T> + Ord,
+    T: std::iter::Sum + std::iter::Product,
+{
+    match op {
+        Op::Sum(dimensions, keepdims) => execute_reduce(
+            input_data,
+            input_shape,
+            output_shape,
+            dimensions,
+            *keepdims,
+            |slice| slice.iter().copied().sum(),
+        ),
+        Op::Prod(dimensions, keepdims) => execute_reduce(
+            input_data,
+            input_shape,
+            output_shape,
+            dimensions,
+            *keepdims,
+            |slice| slice.iter().copied().product(),
+        ),
+        Op::Max(dimensions, keepdims) => execute_reduce(
+            input_data,
+            input_shape,
+            output_shape,
+            dimensions,
+            *keepdims,
+            |slice| slice.iter().copied().max().unwrap_or(T::default()),
+        ),
+        Op::Min(dimensions, keepdims) => execute_reduce(
+            input_data,
+            input_shape,
+            output_shape,
+            dimensions,
+            *keepdims,
+            |slice| slice.iter().copied().min().unwrap_or(T::default()),
+        ),
+        _ => bail!("execute_reduce_op called with non-reduce op: {:?}", op),
+    }
+}
+
+fn execute_reduce<T: Copy>(
+    input_data: &[T],
     input_shape: &[usize],
     output_shape: &[usize],
     dimensions: &[usize],
     keepdims: bool,
-    reducer: impl Fn(&[f32]) -> f32,
-) -> Result<Vec<f32>> {
+    reducer: impl Fn(&[T]) -> T,
+) -> Result<Vec<T>> {
     validate_reduce_dims(input_shape, dimensions)?;
 
     let expected_shape = reduced_shape(input_shape, dimensions, keepdims)?;
@@ -733,7 +1004,7 @@ fn execute_reduce(
     let mut out = Vec::with_capacity(output_shape.iter().product());
     let mut fixed = vec![0usize; rank];
     let mut current = vec![0usize; rank];
-    let mut reduced_values = Vec::with_capacity(reduce_numel);
+    let mut reduced_values: Vec<T> = Vec::with_capacity(reduce_numel);
 
     for out_idx in Indexer::new(output_shape) {
         if keepdims {
@@ -769,14 +1040,14 @@ fn execute_reduce(
     Ok(out)
 }
 
-fn collect_reduce_values(
-    input_data: &[f32],
+fn collect_reduce_values<T: Copy>(
+    input_data: &[T],
     input_shape: &[usize],
     is_reduce_dim: &[bool],
     fixed: &[usize],
     dim: usize,
     current: &mut [usize],
-    values: &mut Vec<f32>,
+    values: &mut Vec<T>,
 ) {
     if dim == input_shape.len() {
         let off = idx_to_offset(current, input_shape);
@@ -788,13 +1059,25 @@ fn collect_reduce_values(
         for i in 0..input_shape[dim] {
             current[dim] = i;
             collect_reduce_values(
-                input_data, input_shape, is_reduce_dim, fixed, dim + 1, current, values,
+                input_data,
+                input_shape,
+                is_reduce_dim,
+                fixed,
+                dim + 1,
+                current,
+                values,
             );
         }
     } else {
         current[dim] = fixed[dim];
         collect_reduce_values(
-            input_data, input_shape, is_reduce_dim, fixed, dim + 1, current, values,
+            input_data,
+            input_shape,
+            is_reduce_dim,
+            fixed,
+            dim + 1,
+            current,
+            values,
         );
     }
 }
@@ -843,11 +1126,11 @@ fn validate_reduce_dims(shape: &[usize], dimensions: &[usize]) -> Result<()> {
     Ok(())
 }
 
-fn execute_reshape(
-    input_data: &[f32],
+fn execute_reshape<T: Copy>(
+    input_data: &[T],
     input_shape: &[usize],
     output_shape: &[usize],
-) -> Result<Vec<f32>> {
+) -> Result<Vec<T>> {
     let in_numel: usize = input_shape.iter().product();
     let out_numel: usize = output_shape.iter().product();
     if in_numel != out_numel || input_data.len() != in_numel {
@@ -860,16 +1143,16 @@ fn execute_reshape(
     Ok(input_data.to_vec())
 }
 
-fn execute_permute(
-    input_data: &[f32],
+fn execute_permute<T: Copy + Default>(
+    input_data: &[T],
     input_shape: &[usize],
     output_shape: &[usize],
     perm: &[usize],
-) -> Result<Vec<f32>> {
+) -> Result<Vec<T>> {
     if perm.len() != input_shape.len() || output_shape.len() != input_shape.len() {
         bail!("invalid permute rank");
     }
-    let mut out = vec![0.0f32; output_shape.iter().product()];
+    let mut out = vec![T::default(); output_shape.iter().product()];
 
     for out_idx in Indexer::new(output_shape) {
         let mut in_idx = vec![0usize; input_shape.len()];
@@ -884,13 +1167,13 @@ fn execute_permute(
     Ok(out)
 }
 
-fn execute_transpose(
-    input_data: &[f32],
+fn execute_transpose<T: Copy + Default>(
+    input_data: &[T],
     input_shape: &[usize],
     output_shape: &[usize],
     dim_1: usize,
     dim_2: usize,
-) -> Result<Vec<f32>> {
+) -> Result<Vec<T>> {
     if dim_1 >= input_shape.len()
         || dim_2 >= input_shape.len()
         || input_shape.len() != output_shape.len()
@@ -903,16 +1186,16 @@ fn execute_transpose(
     execute_permute(input_data, input_shape, output_shape, &perm)
 }
 
-fn execute_expand(
-    input_data: &[f32],
+fn execute_expand<T: Copy + Default>(
+    input_data: &[T],
     input_shape: &[usize],
     output_shape: &[usize],
-) -> Result<Vec<f32>> {
+) -> Result<Vec<T>> {
     if input_shape.len() != output_shape.len() {
         bail!("expand rank mismatch");
     }
 
-    let mut out = vec![0.0f32; output_shape.iter().product()];
+    let mut out = vec![T::default(); output_shape.iter().product()];
     for out_idx in Indexer::new(output_shape) {
         let mut in_idx = vec![0usize; input_shape.len()];
         for d in 0..input_shape.len() {
@@ -937,17 +1220,17 @@ fn execute_expand(
     Ok(out)
 }
 
-fn execute_slice(
-    input_data: &[f32],
+fn execute_slice<T: Copy + Default>(
+    input_data: &[T],
     input_shape: &[usize],
     output_shape: &[usize],
     ranges: &[(usize, usize)],
-) -> Result<Vec<f32>> {
+) -> Result<Vec<T>> {
     if ranges.len() != input_shape.len() || output_shape.len() != input_shape.len() {
         bail!("slice rank mismatch");
     }
 
-    let mut out = vec![0.0f32; output_shape.iter().product()];
+    let mut out = vec![T::default(); output_shape.iter().product()];
     for out_idx in Indexer::new(output_shape) {
         let mut in_idx = vec![0usize; input_shape.len()];
         for d in 0..input_shape.len() {
@@ -970,12 +1253,12 @@ fn execute_slice(
     Ok(out)
 }
 
-fn execute_flip(
-    input_data: &[f32],
+fn execute_flip<T: Copy + Default>(
+    input_data: &[T],
     input_shape: &[usize],
     output_shape: &[usize],
     flips: &[usize],
-) -> Result<Vec<f32>> {
+) -> Result<Vec<T>> {
     if input_shape != output_shape {
         bail!("flip must preserve shape");
     }
@@ -988,7 +1271,7 @@ fn execute_flip(
         flip_mask[d] = true;
     }
 
-    let mut out = vec![0.0f32; output_shape.iter().product()];
+    let mut out = vec![T::default(); output_shape.iter().product()];
     for out_idx in Indexer::new(output_shape) {
         let mut in_idx = out_idx.clone();
         for d in 0..in_idx.len() {
@@ -1005,13 +1288,13 @@ fn execute_flip(
     Ok(out)
 }
 
-fn execute_pad(
-    input_data: &[f32],
+fn execute_pad<T: Copy>(
+    input_data: &[T],
     input_shape: &[usize],
     output_shape: &[usize],
-    constant: f32,
+    constant: T,
     padding: &[(usize, usize)],
-) -> Result<Vec<f32>> {
+) -> Result<Vec<T>> {
     if input_shape.len() != output_shape.len() {
         bail!("pad rank mismatch");
     }
@@ -1063,7 +1346,7 @@ fn import_node(
     src_id: NodeId,
     dst_graph: &mut Graph,
     id_map: &mut std::collections::HashMap<NodeId, NodeId>,
-    buffer_map: &std::collections::HashMap<*const Vec<f32>, NodeId>,
+    buffer_map: &std::collections::HashMap<usize, NodeId>,
 ) -> NodeId {
     if let Some(&mapped) = id_map.get(&src_id) {
         return mapped;
@@ -1071,8 +1354,9 @@ fn import_node(
 
     let node = src_graph.node(src_id);
 
-    if let (Op::Load, Some(super::dtype::Buffer::F32(ref arc))) = (&node.op, &node.buffer) {
-        if let Some(&existing_id) = buffer_map.get(&Arc::as_ptr(arc)) {
+    if let (Op::Load, Some(ref buf)) = (&node.op, &node.buffer) {
+        let ptr_key = buf.as_ptr_u8() as usize;
+        if let Some(&existing_id) = buffer_map.get(&ptr_key) {
             id_map.insert(src_id, existing_id);
             return existing_id;
         }
@@ -1099,6 +1383,11 @@ fn import_node(
 // -------- optimization helpers --------
 
 fn is_optimize_safe(graph: &Graph, root: NodeId) -> bool {
+    // Only optimize float dtypes — egglog rules use float constants.
+    if !graph.node(root).dtype.is_float() {
+        return false;
+    }
+
     fn dfs(graph: &Graph, id: NodeId, seen: &mut std::collections::HashSet<NodeId>) -> bool {
         if !seen.insert(id) {
             return true;
@@ -1163,36 +1452,36 @@ macro_rules! impl_binop {
     ($trait:ident, $method:ident, $op:expr) => {
         // Core implementation: &Tensor op &Tensor
         impl<'a, 'b> std::ops::$trait<&'b Tensor> for &'a Tensor {
-            type Output = Tensor;
+            type Output = Result<Tensor>;
 
-            fn $method(self, rhs: &'b Tensor) -> Tensor {
+            fn $method(self, rhs: &'b Tensor) -> Self::Output {
                 self.binary_op(rhs, $op)
             }
         }
 
         // Tensor op &Tensor
         impl<'b> std::ops::$trait<&'b Tensor> for Tensor {
-            type Output = Tensor;
+            type Output = Result<Tensor>;
 
-            fn $method(self, rhs: &'b Tensor) -> Tensor {
+            fn $method(self, rhs: &'b Tensor) -> Self::Output {
                 self.binary_op(rhs, $op)
             }
         }
 
         // &Tensor op Tensor
         impl<'a> std::ops::$trait<Tensor> for &'a Tensor {
-            type Output = Tensor;
+            type Output = Result<Tensor>;
 
-            fn $method(self, rhs: Tensor) -> Tensor {
+            fn $method(self, rhs: Tensor) -> Self::Output {
                 self.binary_op(&rhs, $op)
             }
         }
 
         // Tensor op Tensor
         impl std::ops::$trait<Tensor> for Tensor {
-            type Output = Tensor;
+            type Output = Result<Tensor>;
 
-            fn $method(self, rhs: Tensor) -> Tensor {
+            fn $method(self, rhs: Tensor) -> Self::Output {
                 self.binary_op(&rhs, $op)
             }
         }

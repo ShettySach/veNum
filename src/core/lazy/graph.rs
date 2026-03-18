@@ -1,6 +1,4 @@
-use std::sync::Arc;
-
-use super::dtype::{Buffer, DType};
+use super::dtype::{Buffer, DType, Scalar};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct NodeId(pub usize);
@@ -9,7 +7,7 @@ pub struct NodeId(pub usize);
 #[allow(dead_code)]
 pub enum Op {
     // Leaf
-    Const(f32),
+    Const(Scalar),
     Load,
 
     // Binary elementwise
@@ -33,7 +31,7 @@ pub enum Op {
     Flip(Vec<usize>),
     Squeeze,
     Unsqueeze(usize),
-    Pad(f32, Vec<(usize, usize)>),
+    Pad(Scalar, Vec<(usize, usize)>),
 
     // Reduce ops
     Sum(Vec<usize>, bool),
@@ -107,45 +105,48 @@ impl Graph {
         &self.nodes[id.0]
     }
 
-    pub fn load(&mut self, data: Arc<Vec<f32>>, shape: Vec<usize>) -> NodeId {
-        let buffer = Buffer::F32(data);
+    pub fn load(&mut self, buffer: Buffer, shape: Vec<usize>) -> NodeId {
+        let dtype = buffer.dtype();
         self.add_node(Node {
             op: Op::Load,
             inputs: vec![],
             shape,
-            dtype: DType::F32,
+            dtype,
             buffer: Some(buffer),
         })
     }
 
-    pub fn constant(&mut self, value: f32, shape: Vec<usize>) -> NodeId {
+    pub fn constant(&mut self, value: Scalar, shape: Vec<usize>) -> NodeId {
+        let dtype = value.dtype();
         self.add_node(Node {
             op: Op::Const(value),
             inputs: vec![],
             shape,
-            dtype: DType::F32,
+            dtype,
             buffer: None,
         })
     }
 
     pub fn binary(&mut self, op: Op, lhs: NodeId, rhs: NodeId) -> NodeId {
         let shape = self.node(lhs).shape.clone();
+        let dtype = self.node(lhs).dtype;
         self.add_node(Node {
             op,
             inputs: vec![lhs, rhs],
             shape,
-            dtype: DType::F32,
+            dtype,
             buffer: None,
         })
     }
 
     pub fn unary(&mut self, op: Op, input: NodeId) -> NodeId {
         let shape = self.node(input).shape.clone();
+        let dtype = self.node(input).dtype;
         self.add_node(Node {
             op,
             inputs: vec![input],
             shape,
-            dtype: DType::F32,
+            dtype,
             buffer: None,
         })
     }
@@ -246,7 +247,7 @@ impl Graph {
     pub fn pad(
         &mut self,
         input: NodeId,
-        constant: f32,
+        constant: Scalar,
         padding: Vec<(usize, usize)>,
         shape: Vec<usize>,
     ) -> NodeId {

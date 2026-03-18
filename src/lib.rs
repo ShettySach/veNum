@@ -12,6 +12,6 @@ Vectorized _N_-dimensional numerical arrays.
 
 mod core;
 
-pub use core::lazy::{Context, Tensor};
+pub use core::lazy::{Context, DType, RealizedTensor, Scalar, Tensor};
 pub use core::naive::ops::conv;
 pub use core::naive::NaiveTensor;

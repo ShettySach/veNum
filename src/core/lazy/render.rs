@@ -35,21 +35,34 @@ fn node_label(graph: &Graph, id: NodeId) -> String {
     let node = graph.node(id);
     let shape_str = format!("{:?}", node.shape);
     match &node.op {
-        Op::Const(v) => format!("Const({v})\\n{shape_str}"),
+        Op::Const(v) => format!("Const({v:?})\\n{shape_str}"),
         Op::Load => {
             let preview = node
                 .buffer
                 .as_ref()
                 .map(|b| {
-                    let data = b.as_f32();
-                    if data.len() <= 4 {
-                        format!("{:?}", data)
-                    } else {
-                        format!("[{}, {}, ... {}]", data[0], data[1], data[data.len() - 1])
+                    let len = b.len();
+                    match b {
+                        super::dtype::Buffer::F32(v) => {
+                            if len <= 4 { format!("{:?}", &**v) }
+                            else { format!("[{}, {}, ... {}]", v[0], v[1], v[len - 1]) }
+                        }
+                        super::dtype::Buffer::F64(v) => {
+                            if len <= 4 { format!("{:?}", &**v) }
+                            else { format!("[{}, {}, ... {}]", v[0], v[1], v[len - 1]) }
+                        }
+                        super::dtype::Buffer::I32(v) => {
+                            if len <= 4 { format!("{:?}", &**v) }
+                            else { format!("[{}, {}, ... {}]", v[0], v[1], v[len - 1]) }
+                        }
+                        super::dtype::Buffer::I64(v) => {
+                            if len <= 4 { format!("{:?}", &**v) }
+                            else { format!("[{}, {}, ... {}]", v[0], v[1], v[len - 1]) }
+                        }
                     }
                 })
                 .unwrap_or_default();
-            format!("Load\\n{preview}\\n{shape_str}")
+            format!("Load {:?}\\n{preview}\\n{shape_str}", node.dtype)
         }
         other => format!("{}\\n{shape_str}", op_label(other)),
     }

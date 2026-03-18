@@ -3,15 +3,12 @@
 </div>
 
 - Stands for vectorized N-dimensional numerical arrays. Tensor / NdArray library.
-- Currently capable of creating CPU Tensors of type T and performing 
+- Currently capable of creating Naive CPU Tensors of type T and performing 
     - broadcasted algebraic operations
-    - Nd matrix multiplication (naive)
-    - 1d and 2d convolution / cross-correlation (naive) with strides
+    - Nd matrix multiplication 
+    - 1d and 2d convolution / cross-correlation with strides
     - reduce operations such as sum, product, max, min and pooling
     - transformations such as view/reshape, permute/transpose, flip, expand, pad, slice, squeeze, unsqueeze
-
-> [!NOTE]
-> WIP. Naive. Needs refactoring and optimization.
 
 - Clone the repo and run examples
 ```bash

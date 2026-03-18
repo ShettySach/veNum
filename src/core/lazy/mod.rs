@@ -10,4 +10,5 @@ mod tensor;
 mod tests;
 
 pub use context::Context;
+pub use dtype::{DType, RealizedTensor, Scalar};
 pub use tensor::Tensor;

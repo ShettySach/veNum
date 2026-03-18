@@ -26,7 +26,7 @@ mod lazy_tests {
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![4]);
         let b = Tensor::from_slice(&cx, &[10.0, 20.0, 30.0, 40.0], vec![4]);
-        let c = &a + &b;
+        let c = (&a + &b)?;
         let result = c.realize()?;
 
         assert_eq!(*result.data(), [11.0, 22.0, 33.0, 44.0]);
@@ -39,7 +39,7 @@ mod lazy_tests {
 
         let a = Tensor::from_slice(&cx, &[2.0, 3.0, 4.0, 5.0], vec![4]);
         let b = Tensor::from_slice(&cx, &[10.0, 10.0, 10.0, 10.0], vec![4]);
-        let c = &a * &b;
+        let c = (&a * &b)?;
         let result = c.realize()?;
 
         assert_eq!(*result.data(), [20.0, 30.0, 40.0, 50.0]);
@@ -53,10 +53,10 @@ mod lazy_tests {
         let a = Tensor::from_slice(&cx, &[10.0, 20.0, 30.0, 40.0], vec![4]);
         let b = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![4]);
 
-        let sub_result = (&a - &b).realize()?;
+        let sub_result = (&a - &b)?.realize()?;
         assert_eq!(*sub_result.data(), [9.0, 18.0, 27.0, 36.0]);
 
-        let div_result = (&a / &b).realize()?;
+        let div_result = (&a / &b)?.realize()?;
         assert_eq!(*div_result.data(), [10.0, 10.0, 10.0, 10.0]);
 
         Ok(())
@@ -69,7 +69,8 @@ mod lazy_tests {
         // (a + b) * a should produce ONE fused kernel.
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![4]);
         let b = Tensor::from_slice(&cx, &[10.0, 20.0, 30.0, 40.0], vec![4]);
-        let c = &(&a + &b) * &a;
+        let sum = (&a + &b)?;
+        let c = (&sum * &a)?;
         let result = c.realize()?;
 
         // (1+10)*1=11, (2+20)*2=44, (3+30)*3=99, (4+40)*4=176
@@ -93,7 +94,7 @@ mod lazy_tests {
         let cx = Context::new();
 
         let a = Tensor::from_slice(&cx, &[0.0, 1.0, 2.0], vec![3]);
-        let result = a.exp().realize()?;
+        let result = a.exp()?.realize()?;
 
         let expected: Vec<f32> = [0.0f32, 1.0, 2.0].iter().map(|x| x.exp()).collect();
         assert!(approx_eq(&result.data(), &expected, 1e-5));
@@ -105,7 +106,7 @@ mod lazy_tests {
         let cx = Context::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.718_281_7, 7.389056], vec![3]);
-        let result = a.ln().realize()?;
+        let result = a.ln()?.realize()?;
 
         let expected: Vec<f32> = [1.0f32, 2.718_281_7, 7.389056]
             .iter()
@@ -120,7 +121,7 @@ mod lazy_tests {
         let cx = Context::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 4.0, 9.0, 16.0], vec![4]);
-        let result = a.sqrt().realize()?;
+        let result = a.sqrt()?.realize()?;
 
         assert_eq!(*result.data(), [1.0, 2.0, 3.0, 4.0]);
         Ok(())
@@ -133,7 +134,7 @@ mod lazy_tests {
         // exp(a) + b — should fuse into one kernel.
         let a = Tensor::from_slice(&cx, &[0.0, 0.0, 0.0], vec![3]);
         let b = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0], vec![3]);
-        let c = &a.exp() + &b;
+        let c = (&a.exp()? + &b)?;
         let result = c.realize()?;
 
         // exp(0) + 1 = 2, exp(0) + 2 = 3, exp(0) + 3 = 4
@@ -147,7 +148,7 @@ mod lazy_tests {
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let b = Tensor::from_slice(&cx, &[10.0, 20.0, 30.0, 40.0], vec![2, 2]);
-        let c = &a + &b;
+        let c = (&a + &b)?;
         let result = c.realize()?;
 
         assert_eq!(*result.data(), [11.0, 22.0, 33.0, 44.0]);
@@ -165,7 +166,7 @@ mod lazy_tests {
 
         let a = Tensor::from_slice(&cx, &a_data, vec![n]);
         let b = Tensor::from_slice(&cx, &b_data, vec![n]);
-        let c = &a + &b;
+        let c = (&a + &b)?;
         let result = c.realize()?;
 
         let expected: Vec<f32> = (0..n).map(|_| n as f32).collect();
@@ -181,7 +182,9 @@ mod lazy_tests {
         let a = Tensor::from_slice(&cx, &[2.0, 3.0, 4.0, 5.0], vec![4]);
         let b = Tensor::from_slice(&cx, &[1.0, 1.0, 1.0, 1.0], vec![4]);
 
-        let c = &(&(&a * &b) + &a) - &b;
+        let ab = (&a * &b)?;
+        let ab_a = (&ab + &a)?;
+        let c = (&ab_a - &b)?;
         let result = c.realize()?;
 
         // (2*1 + 2 - 1) = 3, (3*1 + 3 - 1) = 5, (4*1 + 4 - 1) = 7, (5*1 + 5 - 1) = 9
@@ -195,7 +198,7 @@ mod lazy_tests {
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0], vec![3]);
         let c = Tensor::constant(&cx, 10.0, vec![3]);
-        let result = (&a + &c).realize()?;
+        let result = (&a + &c)?.realize()?;
 
         assert_eq!(*result.data(), [11.0, 12.0, 13.0]);
         Ok(())
@@ -210,7 +213,7 @@ mod lazy_tests {
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0], vec![3]);
         let zero = Tensor::constant(&cx, 0.0, vec![3]);
         // a + 0 should be optimized to just a.
-        let result = (&a + &zero).realize()?;
+        let result = (&a + &zero)?.realize()?;
         assert_eq!(*result.data(), [1.0, 2.0, 3.0]);
         Ok(())
     }
@@ -222,7 +225,7 @@ mod lazy_tests {
         let a = Tensor::from_slice(&cx, &[5.0, 10.0, 15.0], vec![3]);
         let one = Tensor::constant(&cx, 1.0, vec![3]);
         // a * 1 should be optimized to just a.
-        let result = (&a * &one).realize()?;
+        let result = (&a * &one)?.realize()?;
         assert_eq!(*result.data(), [5.0, 10.0, 15.0]);
         Ok(())
     }
@@ -234,7 +237,7 @@ mod lazy_tests {
         let a = Tensor::from_slice(&cx, &[5.0, 10.0, 15.0], vec![3]);
         let zero = Tensor::constant(&cx, 0.0, vec![3]);
         // a * 0 should be optimized to 0.
-        let result = (&a * &zero).realize()?;
+        let result = (&a * &zero)?.realize()?;
         assert_eq!(*result.data(), [0.0, 0.0, 0.0]);
         Ok(())
     }
@@ -256,7 +259,7 @@ mod lazy_tests {
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0], vec![3]);
         // exp(ln(a)) should be optimized to just a.
-        let result = a.ln().exp().realize()?;
+        let result = a.ln()?.exp()?.realize()?;
         assert!(approx_eq(&result.data(), &[1.0, 2.0, 3.0], 1e-5));
         Ok(())
     }
@@ -267,7 +270,7 @@ mod lazy_tests {
 
         let a = Tensor::from_slice(&cx, &[5.0, 10.0, 15.0], vec![3]);
         // a - a should be optimized to 0.
-        let result = (&a - &a).realize()?;
+        let result = (&a - &a)?.realize()?;
         assert_eq!(*result.data(), [0.0, 0.0, 0.0]);
         Ok(())
     }
@@ -363,7 +366,7 @@ mod lazy_tests {
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let summed = a.sum_dims(vec![1], true)?;
         let bias = Tensor::constant(&cx, 10.0, vec![2, 1]);
-        let r = (&summed + &bias).realize()?;
+        let r = (&summed + &bias)?.realize()?;
 
         assert_eq!(*r.data(), [13.0, 17.0]);
         assert_eq!(r.sizes(), &[2, 1]);
@@ -445,6 +448,184 @@ mod lazy_tests {
         // multiplying by identity gives back the same values
         assert_eq!(*r.data(), [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
         assert_eq!(r.sizes(), &[2, 2, 2]);
+        Ok(())
+    }
+
+    // --- multi-dtype tests ---
+
+    #[test]
+    fn i32_add() -> Result<()> {
+        let cx = Context::new();
+
+        let a = Tensor::from_slice_i32(&cx, &[1, 2, 3, 4], vec![4]);
+        let b = Tensor::from_slice_i32(&cx, &[10, 20, 30, 40], vec![4]);
+        let c = (&a + &b)?;
+        let r = c.realize()?;
+
+        assert_eq!(*r.data_i32(), [11, 22, 33, 44]);
+        assert_eq!(r.sizes(), &[4]);
+        Ok(())
+    }
+
+    #[test]
+    fn i32_sub_mul_div() -> Result<()> {
+        let cx = Context::new();
+
+        let a = Tensor::from_slice_i32(&cx, &[10, 20, 30, 40], vec![4]);
+        let b = Tensor::from_slice_i32(&cx, &[1, 2, 3, 4], vec![4]);
+
+        let sub = (&a - &b)?.realize()?;
+        assert_eq!(*sub.data_i32(), [9, 18, 27, 36]);
+
+        let mul = (&a * &b)?.realize()?;
+        assert_eq!(*mul.data_i32(), [10, 40, 90, 160]);
+
+        let div = (&a / &b)?.realize()?;
+        assert_eq!(*div.data_i32(), [10, 10, 10, 10]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn i32_neg() -> Result<()> {
+        let cx = Context::new();
+
+        let a = Tensor::from_slice_i32(&cx, &[1, -2, 3, -4], vec![4]);
+        let r = a.neg().realize()?;
+
+        assert_eq!(*r.data_i32(), [-1, 2, -3, 4]);
+        Ok(())
+    }
+
+    #[test]
+    fn i64_add() -> Result<()> {
+        let cx = Context::new();
+
+        let a = Tensor::from_slice_i64(&cx, &[100, 200, 300], vec![3]);
+        let b = Tensor::from_slice_i64(&cx, &[1, 2, 3], vec![3]);
+        let r = (&a + &b)?.realize()?;
+
+        assert_eq!(*r.data_i64(), [101, 202, 303]);
+        Ok(())
+    }
+
+    #[test]
+    fn f64_add_mul() -> Result<()> {
+        let cx = Context::new();
+
+        let a = Tensor::from_slice_f64(&cx, &[1.0, 2.0, 3.0], vec![3]);
+        let b = Tensor::from_slice_f64(&cx, &[10.0, 20.0, 30.0], vec![3]);
+        let r = (&a + &b)?.realize()?;
+
+        assert_eq!(*r.data_f64(), [11.0, 22.0, 33.0]);
+
+        let r2 = (&a * &b)?.realize()?;
+        assert_eq!(*r2.data_f64(), [10.0, 40.0, 90.0]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn f64_exp_ln() -> Result<()> {
+        let cx = Context::new();
+
+        let a = Tensor::from_slice_f64(&cx, &[0.0, 1.0, 2.0], vec![3]);
+        let r = a.exp()?.realize()?;
+
+        let expected: Vec<f64> = [0.0f64, 1.0, 2.0].iter().map(|x| x.exp()).collect();
+        let data = r.data_f64();
+        assert!(
+            data.iter()
+                .zip(expected.iter())
+                .all(|(a, b)| (a - b).abs() < 1e-10),
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn i32_reduce_sum() -> Result<()> {
+        let cx = Context::new();
+
+        let a = Tensor::from_slice_i32(&cx, &[1, 2, 3, 4], vec![2, 2]);
+        let r = a.sum_dims(vec![1], false)?.realize()?;
+
+        assert_eq!(*r.data_i32(), [3, 7]);
+        assert_eq!(r.sizes(), &[2]);
+        Ok(())
+    }
+
+    #[test]
+    fn i32_reshape_permute() -> Result<()> {
+        let cx = Context::new();
+
+        let a = Tensor::from_slice_i32(&cx, &[1, 2, 3, 4, 5, 6], vec![2, 3]);
+        let r = a.permute(vec![1, 0])?.realize()?;
+
+        assert_eq!(*r.data_i32(), [1, 4, 2, 5, 3, 6]);
+        assert_eq!(r.sizes(), &[3, 2]);
+        Ok(())
+    }
+
+    #[test]
+    fn dtype_mismatch_errors() -> Result<()> {
+        let cx = Context::new();
+
+        let a = Tensor::from_slice(&cx, &[1.0, 2.0], vec![2]);
+        let b = Tensor::from_slice_i32(&cx, &[1, 2], vec![2]);
+
+        let result = &a + &b;
+        assert!(result.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn int_exp_errors() -> Result<()> {
+        let cx = Context::new();
+
+        let a = Tensor::from_slice_i32(&cx, &[1, 2, 3], vec![3]);
+        assert!(a.exp().is_err());
+        assert!(a.ln().is_err());
+        assert!(a.sqrt().is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn i32_constant_add() -> Result<()> {
+        use crate::Scalar;
+
+        let cx = Context::new();
+
+        let a = Tensor::from_slice_i32(&cx, &[1, 2, 3], vec![3]);
+        let c = Tensor::constant_scalar(&cx, Scalar::I32(10), vec![3]);
+        let r = (&a + &c)?.realize()?;
+
+        assert_eq!(*r.data_i32(), [11, 12, 13]);
+        Ok(())
+    }
+
+    #[test]
+    fn f64_constant_add() -> Result<()> {
+        use crate::Scalar;
+
+        let cx = Context::new();
+
+        let a = Tensor::from_slice_f64(&cx, &[1.0, 2.0, 3.0], vec![3]);
+        let c = Tensor::constant_scalar(&cx, Scalar::F64(10.0), vec![3]);
+        let r = (&a + &c)?.realize()?;
+
+        assert_eq!(*r.data_f64(), [11.0, 12.0, 13.0]);
+        Ok(())
+    }
+
+    #[test]
+    fn realize_leaf_i32() -> Result<()> {
+        let cx = Context::new();
+
+        let a = Tensor::from_slice_i32(&cx, &[10, 20, 30], vec![3]);
+        let r = a.realize()?;
+
+        assert_eq!(*r.data_i32(), [10, 20, 30]);
+        assert_eq!(r.sizes(), &[3]);
         Ok(())
     }
 }

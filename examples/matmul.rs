@@ -26,7 +26,7 @@ fn main() -> anyhow::Result<()> {
     println!("KERNELS");
     println!("{}", z.render_kernels());
 
-    println!("{}", z.realize()?);
+    println!("{:?}", z.realize()?);
 
     Ok(())
 }
