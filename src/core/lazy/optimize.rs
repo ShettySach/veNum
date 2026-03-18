@@ -1,9 +1,11 @@
+use anyhow::{bail, Context, Result};
+
 use super::dtype::{DType, Scalar};
 use super::graph::{Graph, Node, NodeId, Op};
 
 /// Run the egglog optimizer on the graph rooted at `root`.
 /// Returns a new, optimized Graph and the new root NodeId.
-pub fn optimize(graph: &Graph, root: NodeId) -> (Graph, NodeId) {
+pub fn optimize(graph: &Graph, root: NodeId) -> Result<(Graph, NodeId)> {
     // 1. Convert our Graph into egglog terms.
     let mut egraph = egglog::EGraph::default();
 
@@ -26,7 +28,7 @@ pub fn optimize(graph: &Graph, root: NodeId) -> (Graph, NodeId) {
             )
             "#,
         )
-        .unwrap();
+        .context("Failed to define egglog datatype")?;
 
     // Algebraic simplification rules.
     egraph
@@ -65,28 +67,32 @@ pub fn optimize(graph: &Graph, root: NodeId) -> (Graph, NodeId) {
             (rewrite (tAdd ?a ?a) (tMul (tConst 2.0) ?a))
             "#,
         )
-        .unwrap();
+        .context("Failed to define egglog rewrite rules")?;
 
     // 2. Insert our DAG as egglog terms.
     let term_str = node_to_egglog(graph, root);
     let insert_cmd = format!("(let root {})", term_str);
-    egraph.parse_and_run_program(None, &insert_cmd).unwrap();
+    egraph
+        .parse_and_run_program(None, &insert_cmd)
+        .context("Failed to insert DAG into egglog")?;
 
     // 3. Run equality saturation.
-    egraph.parse_and_run_program(None, "(run 10)").unwrap();
+    egraph
+        .parse_and_run_program(None, "(run 10)")
+        .context("Failed to run equality saturation")?;
 
     // 4. Extract the best term.
     let outputs = egraph
         .parse_and_run_program(None, "(extract root)")
-        .unwrap();
+        .context("Failed to extract optimized term")?;
 
     let extracted = outputs[0].to_string();
 
     // 5. Parse the extracted term back into a new Graph.
     let root_dtype = graph.node(root).dtype;
-    let (new_graph, new_root) = parse_egglog_term(graph, &extracted, root_dtype);
+    let (new_graph, new_root) = parse_egglog_term(graph, &extracted, root_dtype)?;
 
-    (new_graph, new_root)
+    Ok((new_graph, new_root))
 }
 
 /// Convert a graph node to an egglog s-expression string.
@@ -140,19 +146,19 @@ fn node_to_egglog(graph: &Graph, id: NodeId) -> String {
 
 /// Parse an egglog extracted term back into a Graph.
 /// Reuses Load buffers from the original graph.
-fn parse_egglog_term(original: &Graph, term: &str, root_dtype: DType) -> (Graph, NodeId) {
+fn parse_egglog_term(original: &Graph, term: &str, root_dtype: DType) -> Result<(Graph, NodeId)> {
     let term = term.trim();
     let mut graph = Graph::new();
-    let root = parse_sexpr(original, term, &mut graph, root_dtype);
-    (graph, root)
+    let root = parse_sexpr(original, term, &mut graph, root_dtype)?;
+    Ok((graph, root))
 }
 
 /// Recursive s-expression parser for egglog output.
-fn parse_sexpr(original: &Graph, s: &str, graph: &mut Graph, dtype: DType) -> NodeId {
+fn parse_sexpr(original: &Graph, s: &str, graph: &mut Graph, dtype: DType) -> Result<NodeId> {
     let s = s.trim();
 
     if !s.starts_with('(') {
-        panic!("Expected s-expression, got: {}", s);
+        bail!("Expected s-expression, got: {}", s);
     }
 
     let inner = &s[1..s.len() - 1];
@@ -160,31 +166,37 @@ fn parse_sexpr(original: &Graph, s: &str, graph: &mut Graph, dtype: DType) -> No
 
     match head {
         "tLoad" => {
-            let id: usize = rest.trim().parse().unwrap();
+            let id: usize = rest
+                .trim()
+                .parse()
+                .context("Failed to parse tLoad node id")?;
             let orig_node = original.node(NodeId(id));
-            graph.add_node(Node {
+            Ok(graph.add_node(Node {
                 op: Op::Load,
                 inputs: vec![],
                 shape: orig_node.shape.clone(),
                 dtype: orig_node.dtype,
                 buffer: orig_node.buffer.clone(),
-            })
+            }))
         }
         "tConst" => {
-            let val: f64 = rest.trim().parse().unwrap();
+            let val: f64 = rest
+                .trim()
+                .parse()
+                .context("Failed to parse tConst value")?;
             let scalar = Scalar::from_f64(val, dtype);
-            graph.add_node(Node {
+            Ok(graph.add_node(Node {
                 op: Op::Const(scalar),
                 inputs: vec![],
                 shape: vec![1],
                 dtype,
                 buffer: None,
-            })
+            }))
         }
         "tAdd" | "tSub" | "tMul" | "tDiv" => {
             let (arg1_str, arg2_str) = split_two_args(rest);
-            let lhs = parse_sexpr(original, arg1_str, graph, dtype);
-            let rhs = parse_sexpr(original, arg2_str, graph, dtype);
+            let lhs = parse_sexpr(original, arg1_str, graph, dtype)?;
+            let rhs = parse_sexpr(original, arg2_str, graph, dtype)?;
             let op = match head {
                 "tAdd" => Op::Add,
                 "tSub" => Op::Sub,
@@ -193,16 +205,16 @@ fn parse_sexpr(original: &Graph, s: &str, graph: &mut Graph, dtype: DType) -> No
                 _ => unreachable!(),
             };
             let shape = graph.node(lhs).shape.clone();
-            graph.add_node(Node {
+            Ok(graph.add_node(Node {
                 op,
                 inputs: vec![lhs, rhs],
                 shape,
                 dtype,
                 buffer: None,
-            })
+            }))
         }
         "tExp" | "tLn" | "tSqrt" | "tNeg" => {
-            let arg = parse_sexpr(original, rest.trim(), graph, dtype);
+            let arg = parse_sexpr(original, rest.trim(), graph, dtype)?;
             let op = match head {
                 "tExp" => Op::Exp,
                 "tLn" => Op::Ln,
@@ -211,23 +223,16 @@ fn parse_sexpr(original: &Graph, s: &str, graph: &mut Graph, dtype: DType) -> No
                 _ => unreachable!(),
             };
             let shape = graph.node(arg).shape.clone();
-            graph.add_node(Node {
+            Ok(graph.add_node(Node {
                 op,
                 inputs: vec![arg],
                 shape,
                 dtype,
                 buffer: None,
-            })
+            }))
         }
-        _ => {
-            let orig_node = original.node(NodeId(0));
-            graph.add_node(Node {
-                op: Op::Load,
-                inputs: vec![],
-                shape: orig_node.shape.clone(),
-                dtype: orig_node.dtype,
-                buffer: orig_node.buffer.clone(),
-            })
+        other => {
+            bail!("Unknown s-expression head: {}", other);
         }
     }
 }

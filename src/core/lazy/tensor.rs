@@ -476,31 +476,31 @@ impl Tensor {
         render::render_fused_dag(&graph, self.id)
     }
 
-    pub fn render_optimized_dag(&self) -> String {
+    pub fn render_optimized_dag(&self) -> Result<String> {
         let graph = self.graph.lock().unwrap();
         if !is_optimize_safe(&graph, self.id) {
-            return render::render_dag(&graph, self.id);
+            return Ok(render::render_dag(&graph, self.id));
         }
-        let (opt_graph, opt_root) = optimize::optimize(&graph, self.id);
-        render::render_dag(&opt_graph, opt_root)
+        let (opt_graph, opt_root) = optimize::optimize(&graph, self.id)?;
+        Ok(render::render_dag(&opt_graph, opt_root))
     }
 
-    pub fn render_optimized_fused_dag(&self) -> String {
+    pub fn render_optimized_fused_dag(&self) -> Result<String> {
         let graph = self.graph.lock().unwrap();
         if !is_optimize_safe(&graph, self.id) {
-            return render::render_fused_dag(&graph, self.id);
+            return Ok(render::render_fused_dag(&graph, self.id));
         }
-        let (opt_graph, opt_root) = optimize::optimize(&graph, self.id);
-        render::render_fused_dag(&opt_graph, opt_root)
+        let (opt_graph, opt_root) = optimize::optimize(&graph, self.id)?;
+        Ok(render::render_fused_dag(&opt_graph, opt_root))
     }
 
-    pub fn render_kernels(&self) -> String {
+    pub fn render_kernels(&self) -> Result<String> {
         use std::fmt::Write;
 
         let graph = self.graph.lock().unwrap();
         let optimize_safe = is_optimize_safe(&graph, self.id);
         let (exec_graph, exec_root) = if optimize_safe {
-            optimize::optimize(&graph, self.id)
+            optimize::optimize(&graph, self.id)?
         } else {
             clone_reachable_subgraph(&graph, self.id)
         };
@@ -569,7 +569,7 @@ impl Tensor {
             }
         }
 
-        out
+        Ok(out)
     }
 
     // -------- realize --------
@@ -580,16 +580,13 @@ impl Tensor {
         // Fast path: already-backed leaf.
         let root_node = graph.node(self.id);
         if let Some(ref buffer) = root_node.buffer {
-            return Ok(RealizedTensor::new(
-                buffer.clone(),
-                root_node.shape.clone(),
-            ));
+            return Ok(RealizedTensor::new(buffer.clone(), root_node.shape.clone()));
         }
 
         // Only optimize pure elementwise roots for now.
         let optimize_safe = is_optimize_safe(&graph, self.id);
         let (exec_graph, exec_root) = if optimize_safe {
-            optimize::optimize(&graph, self.id)
+            optimize::optimize(&graph, self.id)?
         } else {
             clone_reachable_subgraph(&graph, self.id)
         };
@@ -600,10 +597,7 @@ impl Tensor {
 
         let root_node = graph.node(root);
         if let Some(ref buffer) = root_node.buffer {
-            return Ok(RealizedTensor::new(
-                buffer.clone(),
-                root_node.shape.clone(),
-            ));
+            return Ok(RealizedTensor::new(buffer.clone(), root_node.shape.clone()));
         }
         if let Op::Const(val) = root_node.op {
             let numel: usize = self.shape.iter().product();
@@ -646,14 +640,9 @@ impl Tensor {
                         })
                         .collect::<Result<Vec<_>>>()?;
 
-                    let mut output_bytes =
-                        super::dtype::zeros(dtype, kernel.numel);
+                    let mut output_bytes = super::dtype::zeros(dtype, kernel.numel);
                     unsafe {
-                        compiled.execute(
-                            &input_ptrs,
-                            output_bytes.as_mut_ptr(),
-                            kernel.numel,
-                        );
+                        compiled.execute(&input_ptrs, output_bytes.as_mut_ptr(), kernel.numel);
                     }
                     realized.insert(kernel.root, buffer_from_bytes(output_bytes, dtype));
                 }
@@ -662,12 +651,8 @@ impl Tensor {
                     let input_shape = &input_node.shape;
                     let dtype = input_node.dtype;
 
-                    let input_buf = get_realized_buffer(
-                        graph,
-                        shape_item.input,
-                        &realized,
-                        "Shape op",
-                    )?;
+                    let input_buf =
+                        get_realized_buffer(graph, shape_item.input, &realized, "Shape op")?;
                     let output = execute_shape_op_typed(
                         &shape_item.op,
                         &input_buf,
@@ -682,12 +667,8 @@ impl Tensor {
                     let input_shape = &input_node.shape;
                     let dtype = input_node.dtype;
 
-                    let input_buf = get_realized_buffer(
-                        graph,
-                        reduce_item.input,
-                        &realized,
-                        "Reduce op",
-                    )?;
+                    let input_buf =
+                        get_realized_buffer(graph, reduce_item.input, &realized, "Reduce op")?;
                     let output = execute_reduce_op_typed(
                         &reduce_item.op,
                         &input_buf,
@@ -863,7 +844,8 @@ fn scalar_to_typed<T: Copy + Default>(s: Scalar) -> T {
             Scalar::I32(v) => std::slice::from_raw_parts(&v as *const i32 as *const u8, 4),
             Scalar::I64(v) => std::slice::from_raw_parts(&v as *const i64 as *const u8, 8),
         };
-        let dst = std::slice::from_raw_parts_mut(&mut val as *mut T as *mut u8, std::mem::size_of::<T>());
+        let dst =
+            std::slice::from_raw_parts_mut(&mut val as *mut T as *mut u8, std::mem::size_of::<T>());
         dst.copy_from_slice(src);
         val
     }

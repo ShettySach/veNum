@@ -24,7 +24,7 @@ fn main() -> anyhow::Result<()> {
     println!("{}", z.render_fused_dag());
     println!();
     println!("KERNELS");
-    println!("{}", z.render_kernels());
+    println!("{}", z.render_kernels()?);
 
     println!("{:?}", z.realize()?);
 
