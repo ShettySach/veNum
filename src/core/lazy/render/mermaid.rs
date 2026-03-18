@@ -1,84 +1,9 @@
 use std::collections::HashSet;
 
-use super::graph::{Graph, NodeId, Op};
-use super::schedule::{build_schedule, ScheduleItem};
+use super::super::graph::{Graph, NodeId};
+use super::super::schedule::{build_schedule, ScheduleItem};
 
-fn op_label(op: &Op) -> &'static str {
-    match op {
-        Op::Const(_) => "Const",
-        Op::Load => "Load",
-        Op::Add => "Add",
-        Op::Sub => "Sub",
-        Op::Mul => "Mul",
-        Op::Div => "Div",
-        Op::Exp => "Exp",
-        Op::Ln => "Ln",
-        Op::Sqrt => "Sqrt",
-        Op::Neg => "Neg",
-        Op::Reshape(_) => "Reshape",
-        Op::Permute(_) => "Permute",
-        Op::Transpose(_, _) => "Transpose",
-        Op::Expand(_) => "Expand",
-        Op::Slice(_) => "Slice",
-        Op::Flip(_) => "Flip",
-        Op::Squeeze => "Squeeze",
-        Op::Unsqueeze(_) => "Unsqueeze",
-        Op::Pad(_, _) => "Pad",
-        Op::Sum(_, _) => "Sum",
-        Op::Prod(_, _) => "Prod",
-        Op::Max(_, _) => "Max",
-        Op::Min(_, _) => "Min",
-    }
-}
-
-fn node_label(graph: &Graph, id: NodeId) -> String {
-    let node = graph.node(id);
-    let shape_str = format!("{:?}", node.shape);
-    match &node.op {
-        Op::Const(v) => format!("Const({v:?})\\n{shape_str}"),
-        Op::Load => {
-            let preview = node
-                .buffer
-                .as_ref()
-                .map(|b| {
-                    let len = b.len();
-                    match b {
-                        super::dtype::Buffer::F32(v) => {
-                            if len <= 4 {
-                                format!("{:?}", &**v)
-                            } else {
-                                format!("[{}, {}, ... {}]", v[0], v[1], v[len - 1])
-                            }
-                        }
-                        super::dtype::Buffer::F64(v) => {
-                            if len <= 4 {
-                                format!("{:?}", &**v)
-                            } else {
-                                format!("[{}, {}, ... {}]", v[0], v[1], v[len - 1])
-                            }
-                        }
-                        super::dtype::Buffer::I32(v) => {
-                            if len <= 4 {
-                                format!("{:?}", &**v)
-                            } else {
-                                format!("[{}, {}, ... {}]", v[0], v[1], v[len - 1])
-                            }
-                        }
-                        super::dtype::Buffer::I64(v) => {
-                            if len <= 4 {
-                                format!("{:?}", &**v)
-                            } else {
-                                format!("[{}, {}, ... {}]", v[0], v[1], v[len - 1])
-                            }
-                        }
-                    }
-                })
-                .unwrap_or_default();
-            format!("Load {:?}\\n{preview}\\n{shape_str}", node.dtype)
-        }
-        other => format!("{}\\n{shape_str}", op_label(other)),
-    }
-}
+use super::labels::{node_label, op_label};
 
 /// Render the raw DAG (before fusion) rooted at `root` as Mermaid flowchart code.
 pub fn render_dag(graph: &Graph, root: NodeId) -> String {

@@ -143,7 +143,7 @@ impl ShapeTracker {
     }
 
     /// Compute the flat buffer index for a logical multi-dim index.
-    /// Returns None if the index is in a padded region (not used yet).
+    #[allow(dead_code)]
     pub fn index(&self, logical_idx: &[usize]) -> usize {
         let mut off = self.offset;
         for (i, &idx) in logical_idx.iter().enumerate() {
@@ -162,6 +162,7 @@ impl ShapeTracker {
     }
 
     /// Number of elements in the logical view.
+    #[allow(dead_code)]
     pub fn numel(&self) -> usize {
         self.shape.iter().product()
     }
