@@ -12,6 +12,8 @@ impl Tensor {
         Self {
             graph,
             kernel_cache: cx.kernel_cache(),
+            plan_cache: cx.plan_cache(),
+            buffer_pool: cx.buffer_pool(),
             id,
             shape,
             dtype: DType::F32,
@@ -25,6 +27,8 @@ impl Tensor {
         Self {
             graph,
             kernel_cache: cx.kernel_cache(),
+            plan_cache: cx.plan_cache(),
+            buffer_pool: cx.buffer_pool(),
             id,
             shape,
             dtype: DType::F64,
@@ -38,6 +42,8 @@ impl Tensor {
         Self {
             graph,
             kernel_cache: cx.kernel_cache(),
+            plan_cache: cx.plan_cache(),
+            buffer_pool: cx.buffer_pool(),
             id,
             shape,
             dtype: DType::I32,
@@ -51,6 +57,8 @@ impl Tensor {
         Self {
             graph,
             kernel_cache: cx.kernel_cache(),
+            plan_cache: cx.plan_cache(),
+            buffer_pool: cx.buffer_pool(),
             id,
             shape,
             dtype: DType::I64,
@@ -66,6 +74,8 @@ impl Tensor {
         Self {
             graph,
             kernel_cache: cx.kernel_cache(),
+            plan_cache: cx.plan_cache(),
+            buffer_pool: cx.buffer_pool(),
             id,
             shape,
             dtype: DType::F32,
@@ -79,6 +89,8 @@ impl Tensor {
         Self {
             graph,
             kernel_cache: cx.kernel_cache(),
+            plan_cache: cx.plan_cache(),
+            buffer_pool: cx.buffer_pool(),
             id,
             shape,
             dtype,

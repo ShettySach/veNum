@@ -3,22 +3,50 @@ use std::collections::{HashMap, HashSet};
 use super::super::graph::{Graph, NodeId, Op};
 use super::super::shape_tracker::ShapeTracker;
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ReduceKind {
+    Sum,
+    Prod,
+    Max,
+    Min,
+}
+
+#[derive(Clone, Debug)]
+pub struct ReduceSpec {
+    pub op: ReduceKind,
+    pub dims: Vec<usize>,
+    pub keepdims: bool,
+}
+
 /// A fused elementwise kernel: a tree of ops over input buffers producing one output.
 #[derive(Debug)]
 pub struct FusedKernel {
     pub root: NodeId,
+    /// The node whose expression tree is evaluated per iteration element.
+    /// For pure elementwise kernels this equals `root`; for reduce kernels
+    /// this is the reduce input subtree root.
+    pub expr_root: NodeId,
     /// Leaf node ids that must be realized before this kernel runs.
     pub input_buffers: Vec<NodeId>,
     /// Number of elements in the output.
     pub numel: usize,
     /// Output shape for multi-dim index decomposition in the JIT.
     pub output_shape: Vec<usize>,
-    /// ShapeTrackers for input buffers that were reached through shape ops.
-    /// Key = NodeId of the input buffer, value = tracker mapping output indices -> buffer offsets.
-    pub input_trackers: HashMap<NodeId, ShapeTracker>,
-    /// Maps inlined shape op NodeIds to their ultimate source buffer NodeId.
+    /// Logical iteration shape for expression evaluation.
+    /// For pure elementwise kernels this equals `output_shape`;
+    /// for reduce kernels this is the pre-reduce input shape.
+    pub iter_shape: Vec<usize>,
+    /// Dense map from NodeId.0 -> tracker for inputs reached through absorbed shape ops.
+    pub input_trackers: Vec<Option<ShapeTracker>>,
+    /// Dense map from shape-op NodeId.0 -> ultimate source buffer NodeId.
     /// Used by the JIT to resolve graph references that point at absorbed shape ops.
-    pub shape_source_map: HashMap<NodeId, NodeId>,
+    pub shape_source_map: Vec<Option<NodeId>>,
+    /// Number of entries in `input_trackers` that are Some.
+    pub num_tracked_inputs: usize,
+    /// Number of entries in `shape_source_map` that are Some.
+    pub num_absorbed_shape_ops: usize,
+    /// Present for reduce-fused kernels.
+    pub reduce: Option<ReduceSpec>,
 }
 
 /// Shape-op barrier item.
@@ -47,8 +75,10 @@ pub(super) fn collect_kernel_inputs(
     consumer_counts: &HashMap<NodeId, usize>,
     inlined: &mut HashSet<NodeId>,
     inputs: &mut Vec<NodeId>,
-    trackers: &mut HashMap<NodeId, ShapeTracker>,
-    source_map: &mut HashMap<NodeId, NodeId>,
+    trackers: &mut Vec<Option<ShapeTracker>>,
+    source_map: &mut Vec<Option<NodeId>>,
+    num_tracked_inputs: &mut usize,
+    num_absorbed_shape_ops: &mut usize,
     output_shape: &[usize],
 ) {
     let node = graph.node(id);
@@ -70,14 +100,20 @@ pub(super) fn collect_kernel_inputs(
                 // Mark all shape ops in the chain as inlined and record source mapping.
                 for &shape_id in &chain {
                     inlined.insert(shape_id);
-                    source_map.insert(shape_id, source);
+                    if source_map[shape_id.0].is_none() {
+                        *num_absorbed_shape_ops += 1;
+                    }
+                    source_map[shape_id.0] = Some(source);
                 }
 
                 // The source becomes a kernel input with a tracker.
                 if !inputs.contains(&source) {
                     inputs.push(source);
                 }
-                trackers.insert(source, tracker);
+                if trackers[source.0].is_none() {
+                    *num_tracked_inputs += 1;
+                }
+                trackers[source.0] = Some(tracker);
                 continue;
             }
         }
@@ -96,6 +132,8 @@ pub(super) fn collect_kernel_inputs(
                 inputs,
                 trackers,
                 source_map,
+                num_tracked_inputs,
+                num_absorbed_shape_ops,
                 output_shape,
             );
         } else {
@@ -109,7 +147,7 @@ pub(super) fn collect_kernel_inputs(
 
 /// Walk back through a chain of shape ops, composing a ShapeTracker.
 /// Returns Some((source_node_id, tracker, chain)) if the chain can be absorbed.
-fn try_build_tracker(
+pub(super) fn try_build_tracker(
     graph: &Graph,
     shape_node_id: NodeId,
     consumer_counts: &HashMap<NodeId, usize>,
@@ -141,8 +179,8 @@ fn try_build_tracker(
     for &shape_id in chain.iter().rev() {
         let node = graph.node(shape_id);
         tracker = match &node.op {
-            Op::Reshape(new_shape) => tracker.reshape(new_shape),
-            Op::Expand(expansions) => tracker.expand(expansions),
+            Op::Reshape => tracker.reshape(&node.shape),
+            Op::Expand => tracker.expand(&node.shape),
             Op::Permute(axes) => tracker.permute(axes),
             Op::Transpose(d1, d2) => tracker.transpose(*d1, *d2),
             Op::Squeeze => Some(tracker.squeeze()),

@@ -1,8 +1,9 @@
 mod egglog_program;
 mod parse;
-mod serialize;
 
 use anyhow::{Context, Result};
+
+use egglog::prelude::*;
 
 use super::graph::{Graph, NodeId};
 
@@ -11,32 +12,49 @@ use super::graph::{Graph, NodeId};
 pub fn optimize(graph: &Graph, root: NodeId) -> Result<(Graph, NodeId)> {
     let mut egraph = egglog::EGraph::default();
 
-    egglog_program::define_datatype(&mut egraph).context("Failed to define egglog datatype")?;
-    egglog_program::define_rewrites(&mut egraph)
-        .context("Failed to define egglog rewrite rules")?;
+    let span = span!();
+    let mut program = egglog_program::commands();
 
-    // Insert our DAG as an egglog term.
-    let term_str = serialize::node_to_egglog(graph, root);
-    let insert_cmd = format!("(let root {term_str})");
-    egraph
-        .parse_and_run_program(None, &insert_cmd)
-        .context("Failed to insert DAG into egglog")?;
+    // Insert our DAG as egglog terms without any text parsing.
+    program.extend(egglog_program::graph_to_actions(graph, root));
 
-    // Equality saturation.
-    egraph
-        .parse_and_run_program(None, "(run 10)")
-        .context("Failed to run equality saturation")?;
+    // Equality saturation: 10 iterations over the default ruleset.
+    program.push(egglog::ast::Command::RunSchedule(
+        egglog::ast::Schedule::Repeat(
+            span.clone(),
+            10,
+            Box::new(egglog::ast::Schedule::Run(
+                span.clone(),
+                egglog::ast::RunConfig {
+                    ruleset: "".to_owned(),
+                    until: None,
+                },
+            )),
+        ),
+    ));
 
-    // Extract best term.
+    // Extract best term for `root`.
+    program.push(egglog::ast::Command::Extract(
+        span.clone(),
+        egglog::ast::Expr::Var(span.clone(), "root".to_owned()),
+        egglog::ast::Expr::Lit(span.clone(), egglog::ast::Literal::Int(0)),
+    ));
+
     let outputs = egraph
-        .parse_and_run_program(None, "(extract root)")
-        .context("Failed to extract optimized term")?;
+        .run_program(program)
+        .context("Failed to run egglog optimization program")?;
 
-    let extracted = outputs[0].to_string();
+    let mut extracted = None;
+    for output in outputs {
+        if let egglog::CommandOutput::ExtractBest(termdag, _cost, term) = output {
+            extracted = Some((termdag, term));
+        }
+    }
+    let (termdag, term) = extracted.context("Egglog returned no extract output")?;
 
     // Parse extracted term back into a new Graph.
     let root_dtype = graph.node(root).dtype;
-    let (new_graph, new_root) = parse::parse_egglog_term(graph, &extracted, root_dtype)?;
+    let (new_graph, new_root) = parse::parse_extracted_term(graph, &termdag, &term, root_dtype)?;
 
     Ok((new_graph, new_root))
 }

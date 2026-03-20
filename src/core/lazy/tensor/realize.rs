@@ -1,10 +1,13 @@
 use anyhow::{anyhow, bail, Result};
+use std::sync::Arc;
 
+use super::super::context::SharedBufferPool;
 use super::super::dtype::{Buffer, RealizedTensor};
 use super::super::exec;
-use super::super::graph::{NodeId, Op};
+use super::super::graph::{Graph, NodeId, Op};
 use super::super::jit::{compile_kernel, KernelSignature};
 use super::super::optimize;
+use super::super::plan::{ExecItem, ExecutionPlan, GraphSignature};
 use super::super::schedule::{build_schedule, ScheduleItem};
 use super::helpers::{clone_reachable_subgraph, is_optimize_safe};
 use super::Tensor;
@@ -19,7 +22,21 @@ impl Tensor {
             return Ok(RealizedTensor::new(buffer.clone(), root_node.shape.clone()));
         }
 
-        // Only optimize pure elementwise roots for now.
+        // Compute the graph signature for plan cache lookup.
+        let sig = GraphSignature::from_graph(&graph, self.id);
+
+        // Check the plan cache.
+        {
+            let cache = self.plan_cache.lock().unwrap();
+            if let Some(plan) = cache.get(&sig) {
+                let plan = Arc::clone(plan);
+                drop(cache);
+                drop(graph);
+                return run_plan(&plan, &self.buffer_pool);
+            }
+        }
+
+        // Cache miss — build the execution graph and plan.
         let optimize_safe = is_optimize_safe(&graph, self.id);
         let (exec_graph, exec_root) = if optimize_safe {
             optimize::optimize(&graph, self.id)?
@@ -28,100 +45,266 @@ impl Tensor {
         };
         drop(graph);
 
-        let graph = &exec_graph;
-        let root = exec_root;
+        let plan = build_plan(exec_graph, exec_root, &self.kernel_cache, &self.shape)?;
+        let plan = Arc::new(plan);
 
-        let root_node = graph.node(root);
-        if let Some(ref buffer) = root_node.buffer {
-            return Ok(RealizedTensor::new(buffer.clone(), root_node.shape.clone()));
-        }
-        if let Op::Const(val) = root_node.op {
-            let numel: usize = self.shape.iter().product();
-            let buffer = exec::scalar_fill_buffer(val, numel);
-            return Ok(RealizedTensor::new(buffer, self.shape.clone()));
+        // Cache the plan.
+        {
+            let mut cache = self.plan_cache.lock().unwrap();
+            cache.insert(sig, Arc::clone(&plan));
         }
 
-        let schedule = build_schedule(graph, root);
-        let mut realized: std::collections::HashMap<NodeId, Buffer> =
-            std::collections::HashMap::new();
+        run_plan(&plan, &self.buffer_pool)
+    }
+}
 
-        for item in &schedule {
-            match item {
-                ScheduleItem::Fused(kernel) => {
-                    let dtype = graph.node(kernel.root).dtype;
-                    let sig = KernelSignature::from_kernel(graph, kernel);
-                    let compiled = {
-                        let mut cache = self.kernel_cache.lock().unwrap();
-                        if let Some(cached) = cache.get(&sig) {
-                            std::sync::Arc::clone(cached)
+/// Build an `ExecutionPlan` from an execution graph.
+fn build_plan(
+    exec_graph: Graph,
+    root: NodeId,
+    kernel_cache: &std::sync::Mutex<
+        std::collections::HashMap<
+            KernelSignature,
+            Arc<super::super::jit::CompiledKernel>,
+        >,
+    >,
+    tensor_shape: &[usize],
+) -> Result<ExecutionPlan> {
+    let root_node = exec_graph.node(root);
+
+    // Handle already-backed root in exec graph.
+    if root_node.buffer.is_some() {
+        return Ok(ExecutionPlan {
+            items: vec![],
+            inputs: vec![],
+            output: root,
+            output_shape: tensor_shape.to_vec(),
+            exec_graph,
+        });
+    }
+
+    // Handle const root — egglog may collapse to a scalar Const(v) with shape [1],
+    // but the tensor expects the original shape, so fill to `tensor_shape`.
+    if let Op::Const(val) = root_node.op {
+        let numel: usize = tensor_shape.iter().product();
+        return Ok(ExecutionPlan {
+            items: vec![ExecItem::ConstFill {
+                value: val,
+                output: root,
+                numel,
+            }],
+            inputs: vec![],
+            output: root,
+            output_shape: tensor_shape.to_vec(),
+            exec_graph,
+        });
+    }
+
+    let schedule = build_schedule(&exec_graph, root);
+
+    let mut items = Vec::with_capacity(schedule.len());
+
+    for item in &schedule {
+        match item {
+            ScheduleItem::Fused(kernel) => {
+                let dtype = exec_graph.node(kernel.root).dtype;
+                let sig = KernelSignature::from_kernel(&exec_graph, kernel);
+                let compiled = {
+                    let mut cache = kernel_cache.lock().unwrap();
+                    if let Some(cached) = cache.get(&sig) {
+                        Arc::clone(cached)
+                    } else {
+                        let compiled =
+                            Arc::new(compile_kernel(&exec_graph, kernel, false)?);
+                        cache.insert(sig, Arc::clone(&compiled));
+                        compiled
+                    }
+                };
+
+                items.push(ExecItem::Kernel {
+                    compiled,
+                    inputs: kernel.input_buffers.clone(),
+                    output: kernel.root,
+                    numel: kernel.numel,
+                    dtype,
+                });
+            }
+            ScheduleItem::Shape(shape_item) => {
+                let input_node = exec_graph.node(shape_item.input);
+                items.push(ExecItem::Shape {
+                    op: shape_item.op.clone(),
+                    input: shape_item.input,
+                    output: shape_item.root,
+                    input_shape: input_node.shape.clone(),
+                    output_shape: shape_item.shape.clone(),
+                });
+            }
+            ScheduleItem::Reduce(reduce_item) => {
+                let input_node = exec_graph.node(reduce_item.input);
+                items.push(ExecItem::Reduce {
+                    op: reduce_item.op.clone(),
+                    input: reduce_item.input,
+                    output: reduce_item.root,
+                    input_shape: input_node.shape.clone(),
+                    output_shape: reduce_item.shape.clone(),
+                });
+            }
+        }
+    }
+
+    let output_shape = exec_graph.node(root).shape.clone();
+
+    Ok(ExecutionPlan {
+        items,
+        inputs: vec![],
+        output: root,
+        output_shape,
+        exec_graph,
+    })
+}
+
+/// Compute the last step index at which each intermediate NodeId is read.
+fn compute_last_use(plan: &ExecutionPlan) -> std::collections::HashMap<NodeId, usize> {
+    let mut last_use = std::collections::HashMap::new();
+    for (step, item) in plan.items.iter().enumerate() {
+        match item {
+            ExecItem::Kernel { inputs, .. } => {
+                for &id in inputs {
+                    last_use.insert(id, step);
+                }
+            }
+            ExecItem::Shape { input, .. } | ExecItem::Reduce { input, .. } => {
+                last_use.insert(*input, step);
+            }
+            ExecItem::ConstFill { .. } => {}
+        }
+    }
+    last_use
+}
+
+/// Execute a cached plan to produce a realized tensor.
+fn run_plan(plan: &ExecutionPlan, pool: &SharedBufferPool) -> Result<RealizedTensor> {
+    let graph = &plan.exec_graph;
+
+    // If plan has no items, the output must be a direct buffer in the exec graph.
+    if plan.items.is_empty() {
+        let node = graph.node(plan.output);
+        if let Some(ref buffer) = node.buffer {
+            return Ok(RealizedTensor::new(buffer.clone(), plan.output_shape.clone()));
+        }
+        bail!("Empty plan with no output buffer available");
+    }
+
+    let last_use = compute_last_use(plan);
+
+    let mut realized: std::collections::HashMap<NodeId, Buffer> =
+        std::collections::HashMap::new();
+
+    for (step, item) in plan.items.iter().enumerate() {
+        match item {
+            ExecItem::Kernel {
+                compiled,
+                inputs,
+                output,
+                numel,
+                dtype,
+            } => {
+                let input_ptrs: Vec<*const u8> = inputs
+                    .iter()
+                    .map(|&buf_id| -> Result<*const u8> {
+                        if let Some(buf) = realized.get(&buf_id) {
+                            Ok(buf.as_ptr_u8())
                         } else {
-                            let compiled =
-                                std::sync::Arc::new(compile_kernel(graph, kernel, false)?);
-                            cache.insert(sig, std::sync::Arc::clone(&compiled));
-                            compiled
-                        }
-                    };
-
-                    let input_ptrs: Vec<*const u8> = kernel
-                        .input_buffers
-                        .iter()
-                        .map(|&buf_id| -> Result<*const u8> {
                             let node = graph.node(buf_id);
                             if let Some(ref buffer) = node.buffer {
                                 Ok(buffer.as_ptr_u8())
-                            } else if let Some(buf) = realized.get(&buf_id) {
-                                Ok(buf.as_ptr_u8())
                             } else {
-                                bail!("Input buffer {:?} not realized and has no data", buf_id);
+                                bail!(
+                                    "Input buffer {:?} not realized and has no data",
+                                    buf_id
+                                );
                             }
-                        })
-                        .collect::<Result<Vec<_>>>()?;
+                        }
+                    })
+                    .collect::<Result<Vec<_>>>()?;
 
-                    let mut output_bytes = super::super::dtype::zeros(dtype, kernel.numel);
-                    unsafe {
-                        compiled.execute(&input_ptrs, output_bytes.as_mut_ptr(), kernel.numel);
-                    }
-                    realized.insert(kernel.root, exec::buffer_from_bytes(output_bytes, dtype));
+                let mut output_bytes = pool.lock().unwrap().acquire(*dtype, *numel);
+                unsafe {
+                    compiled.execute(&input_ptrs, output_bytes.as_mut_ptr(), *numel);
                 }
-                ScheduleItem::Shape(shape_item) => {
-                    let input_node = graph.node(shape_item.input);
-                    let input_shape = &input_node.shape;
-
-                    let input_buf =
-                        exec::get_realized_buffer(graph, shape_item.input, &realized, "Shape op")?;
-                    let output = exec::execute_shape_op_typed(
-                        &shape_item.op,
-                        &input_buf,
-                        input_shape,
-                        &shape_item.shape,
-                    )?;
-                    realized.insert(shape_item.root, output);
-                }
-                ScheduleItem::Reduce(reduce_item) => {
-                    let input_node = graph.node(reduce_item.input);
-                    let input_shape = &input_node.shape;
-
-                    let input_buf = exec::get_realized_buffer(
-                        graph,
-                        reduce_item.input,
-                        &realized,
-                        "Reduce op",
-                    )?;
-                    let output = exec::execute_reduce_op_typed(
-                        &reduce_item.op,
-                        &input_buf,
-                        input_shape,
-                        &reduce_item.shape,
-                    )?;
-                    realized.insert(reduce_item.root, output);
-                }
+                realized.insert(*output, exec::buffer_from_bytes(output_bytes, *dtype));
+            }
+            ExecItem::Shape {
+                op,
+                input,
+                output,
+                input_shape,
+                output_shape,
+            } => {
+                let input_buf = resolve_buffer(graph, *input, &realized, "Shape op")?;
+                let result =
+                    exec::execute_shape_op_typed(op, &input_buf, input_shape, output_shape)?;
+                realized.insert(*output, result);
+            }
+            ExecItem::Reduce {
+                op,
+                input,
+                output,
+                input_shape,
+                output_shape,
+            } => {
+                let input_buf = resolve_buffer(graph, *input, &realized, "Reduce op")?;
+                let result =
+                    exec::execute_reduce_op_typed(op, &input_buf, input_shape, output_shape)?;
+                realized.insert(*output, result);
+            }
+            ExecItem::ConstFill {
+                value,
+                output,
+                numel,
+            } => {
+                let buffer = exec::scalar_fill_buffer(*value, *numel);
+                realized.insert(*output, buffer);
             }
         }
 
-        let buf = realized
-            .remove(&root)
-            .ok_or_else(|| anyhow!("Root node was not realized"))?;
+        // Release dead intermediates back to the pool.
+        // Only release intermediates that are not the final output.
+        for (&node_id, &last_step) in &last_use {
+            if last_step == step && node_id != plan.output {
+                if let Some(buf) = realized.remove(&node_id) {
+                    let dtype = buf.dtype();
+                    let numel = buf.len();
+                    // We can't recover the raw Vec<u8> from a Buffer, so just drop it.
+                    // The pool is used for kernel output allocations above.
+                    drop(buf);
+                    let _ = (dtype, numel);
+                }
+            }
+        }
+    }
 
-        Ok(RealizedTensor::new(buf, graph.node(root).shape.clone()))
+    let buf = realized
+        .remove(&plan.output)
+        .ok_or_else(|| anyhow!("Root node was not realized"))?;
+
+    Ok(RealizedTensor::new(buf, plan.output_shape.clone()))
+}
+
+fn resolve_buffer(
+    graph: &Graph,
+    node_id: NodeId,
+    realized: &std::collections::HashMap<NodeId, Buffer>,
+    context: &str,
+) -> Result<Buffer> {
+    if let Some(buf) = realized.get(&node_id) {
+        Ok(buf.clone())
+    } else {
+        let node = graph.node(node_id);
+        if let Some(ref buffer) = node.buffer {
+            Ok(buffer.clone())
+        } else {
+            bail!("{} input {:?} not realized and has no data", context, node_id);
+        }
     }
 }

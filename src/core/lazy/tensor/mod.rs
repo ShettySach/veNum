@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use std::sync::Arc;
 
-use super::context::KernelCache;
+use super::context::{KernelCache, PlanCache, SharedBufferPool};
 use super::dtype::DType;
 use super::graph::{Graph, NodeId, Op};
 
@@ -20,6 +20,8 @@ mod visualize;
 pub struct Tensor {
     pub(super) graph: Arc<std::sync::Mutex<Graph>>,
     pub(super) kernel_cache: KernelCache,
+    pub(super) plan_cache: PlanCache,
+    pub(super) buffer_pool: SharedBufferPool,
     pub(super) id: NodeId,
     pub(super) shape: Vec<usize>,
     pub(super) dtype: DType,
@@ -34,6 +36,8 @@ impl Tensor {
         Self {
             graph: Arc::clone(&self.graph),
             kernel_cache: Arc::clone(&self.kernel_cache),
+            plan_cache: Arc::clone(&self.plan_cache),
+            buffer_pool: Arc::clone(&self.buffer_pool),
             id,
             shape,
             dtype: self.dtype,

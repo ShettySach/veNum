@@ -3,10 +3,18 @@ use anyhow::{bail, Result};
 use super::super::graph::{Graph, Node, NodeId, Op};
 
 pub(super) fn clone_reachable_subgraph(src: &Graph, root: NodeId) -> (Graph, NodeId) {
+    let (dst, new_root, _) = clone_reachable_subgraph_with_map(src, root);
+    (dst, new_root)
+}
+
+pub(super) fn clone_reachable_subgraph_with_map(
+    src: &Graph,
+    root: NodeId,
+) -> (Graph, NodeId, std::collections::HashMap<NodeId, NodeId>) {
     let mut dst = Graph::new();
     let mut id_map = std::collections::HashMap::new();
     let new_root = import_node(src, root, &mut dst, &mut id_map);
-    (dst, new_root)
+    (dst, new_root, id_map)
 }
 
 pub(super) fn is_optimize_safe(graph: &Graph, root: NodeId) -> bool {

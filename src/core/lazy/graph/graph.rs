@@ -71,7 +71,7 @@ impl Graph {
 
     pub fn reshape(&mut self, input: NodeId, shape: Vec<usize>) -> NodeId {
         self.add_node(Node {
-            op: Op::Reshape(shape.clone()),
+            op: Op::Reshape,
             inputs: vec![input],
             shape,
             dtype: self.node(input).dtype,
@@ -105,9 +105,9 @@ impl Graph {
         })
     }
 
-    pub fn expand(&mut self, input: NodeId, expansions: Vec<usize>, shape: Vec<usize>) -> NodeId {
+    pub fn expand(&mut self, input: NodeId, shape: Vec<usize>) -> NodeId {
         self.add_node(Node {
-            op: Op::Expand(expansions),
+            op: Op::Expand,
             inputs: vec![input],
             shape,
             dtype: self.node(input).dtype,

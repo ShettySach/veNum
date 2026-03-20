@@ -57,3 +57,26 @@ pub(super) fn compute_tracker_byte_offset(
     let size_val = builder.ins().iconst(types::I64, elem_size);
     builder.ins().imul(sum, size_val)
 }
+
+/// Compute a flat index from per-dimension indices and shape.
+///
+/// For shape [s0, s1, s2] and indices [d0, d1, d2]:
+///   flat = d0 * (s1 * s2) + d1 * s2 + d2
+pub(super) fn flatten_multi_index(
+    builder: &mut FunctionBuilder,
+    indices: &[Value],
+    shape: &[usize],
+) -> Value {
+    let rank = shape.len();
+    let mut result = builder.ins().iconst(types::I64, 0);
+
+    let mut stride = 1i64;
+    for d in (0..rank).rev() {
+        let stride_val = builder.ins().iconst(types::I64, stride);
+        let contribution = builder.ins().imul(indices[d], stride_val);
+        result = builder.ins().iadd(result, contribution);
+        stride *= shape[d] as i64;
+    }
+
+    result
+}

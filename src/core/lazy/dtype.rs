@@ -189,6 +189,7 @@ impl Buffer {
     }
 }
 
+#[allow(dead_code)]
 pub fn zeros(dtype: DType, numel: usize) -> Vec<u8> {
     vec![0u8; numel * dtype.size_bytes()]
 }

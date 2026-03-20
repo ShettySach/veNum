@@ -4,6 +4,7 @@ mod exec;
 mod graph;
 mod jit;
 mod optimize;
+mod plan;
 mod render;
 mod schedule;
 pub(crate) mod shape_tracker;

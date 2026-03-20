@@ -1,10 +1,9 @@
-use std::collections::HashMap;
-
 use anyhow::Result;
 use cranelift::prelude::{types, FunctionBuilder, InstBuilder, MemFlags, Value};
 
 use super::super::dtype::{DType, Scalar};
 use super::super::graph::{Graph, NodeId, Op};
+use super::index_map::id_to_index;
 use super::math::{math_func_ref_for_op, MathFuncRefs};
 
 /// Recursively build the Cranelift IR for the expression tree rooted at `id`.
@@ -13,11 +12,11 @@ pub(super) fn build_expression(
     id: NodeId,
     builder: &mut FunctionBuilder,
     input_ptrs: &[Value],
-    input_index: &HashMap<NodeId, usize>,
+    input_index: &[Option<usize>],
     byte_offset: Value,
     math: &MathFuncRefs,
-    tracked_byte_offsets: &HashMap<NodeId, Value>,
-    shape_source_map: &HashMap<NodeId, NodeId>,
+    tracked_byte_offsets: &[Option<Value>],
+    shape_source_map: &[Option<NodeId>],
     dtype: DType,
     cl_type: types::Type,
 ) -> Result<Value> {
@@ -25,27 +24,19 @@ pub(super) fn build_expression(
 
     match &node.op {
         op if !op.is_elementwise() && !matches!(op, Op::Const(_)) => {
-            let resolved_id = shape_source_map.get(&id).copied().unwrap_or(id);
-            let idx = input_index
-                .get(&resolved_id)
+            let resolved_id = shape_source_map[id_to_index(id)].unwrap_or(id);
+            let idx = input_index[id_to_index(resolved_id)]
                 .ok_or_else(|| anyhow::anyhow!("Barrier node {:?} not found in input_index", id))?;
-            let ptr = input_ptrs[*idx];
-            let offset = tracked_byte_offsets
-                .get(&resolved_id)
-                .copied()
-                .unwrap_or(byte_offset);
+            let ptr = input_ptrs[idx];
+            let offset = tracked_byte_offsets[id_to_index(resolved_id)].unwrap_or(byte_offset);
             let addr = builder.ins().iadd(ptr, offset);
             Ok(builder.ins().load(cl_type, MemFlags::new(), addr, 0))
         }
         Op::Load => {
-            let idx = input_index
-                .get(&id)
+            let idx = input_index[id_to_index(id)]
                 .ok_or_else(|| anyhow::anyhow!("Load node {:?} not found in input_index", id))?;
-            let ptr = input_ptrs[*idx];
-            let offset = tracked_byte_offsets
-                .get(&id)
-                .copied()
-                .unwrap_or(byte_offset);
+            let ptr = input_ptrs[idx];
+            let offset = tracked_byte_offsets[id_to_index(id)].unwrap_or(byte_offset);
             let addr = builder.ins().iadd(ptr, offset);
             Ok(builder.ins().load(cl_type, MemFlags::new(), addr, 0))
         }

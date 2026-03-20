@@ -45,10 +45,10 @@ fn execute_shape_op<T: Copy + Default>(
     output_shape: &[usize],
 ) -> Result<Vec<T>> {
     match op {
-        Op::Reshape(_) => execute_reshape(input_data, input_shape, output_shape),
+        Op::Reshape => execute_reshape(input_data, input_shape, output_shape),
         Op::Permute(perm) => execute_permute(input_data, input_shape, output_shape, perm),
         Op::Transpose(d1, d2) => execute_transpose(input_data, input_shape, output_shape, *d1, *d2),
-        Op::Expand(_) => execute_expand(input_data, input_shape, output_shape),
+        Op::Expand => execute_expand(input_data, input_shape, output_shape),
         Op::Slice(ranges) => execute_slice(input_data, input_shape, output_shape, ranges),
         Op::Flip(flips) => execute_flip(input_data, input_shape, output_shape, flips),
         Op::Squeeze => execute_reshape(input_data, input_shape, output_shape),

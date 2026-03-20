@@ -20,10 +20,10 @@ pub enum Op {
     Neg,
 
     // Shape ops (lazy graph nodes)
-    Reshape(Vec<usize>),
+    Reshape,
     Permute(Vec<usize>),
     Transpose(usize, usize),
-    Expand(Vec<usize>),
+    Expand,
     Slice(Vec<(usize, usize)>),
     Flip(Vec<usize>),
     Squeeze,
@@ -48,10 +48,10 @@ impl Op {
     pub fn is_shape_op(&self) -> bool {
         matches!(
             self,
-            Op::Reshape(_)
+            Op::Reshape
                 | Op::Permute(_)
                 | Op::Transpose(_, _)
-                | Op::Expand(_)
+                | Op::Expand
                 | Op::Slice(_)
                 | Op::Flip(_)
                 | Op::Squeeze

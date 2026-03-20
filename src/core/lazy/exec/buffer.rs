@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use super::super::dtype::{Buffer, DType, Scalar};
 use super::super::graph::{Graph, NodeId};
 
+#[allow(dead_code)]
 pub(crate) fn get_realized_buffer<'a>(
     graph: &'a Graph,
     node_id: NodeId,

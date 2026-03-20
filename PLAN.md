@@ -1,118 +1,155 @@
-# Lazy-First Refactor Plan
+# veNum Execution Plan
 
-## Problem
+This document is the project roadmap with emphasis on repeated execution
+workloads (training loops + GPT-2 style inference).
 
-The codebase currently treats `ETensor` (eager) as the primary, feature-rich type
-and `LTensor` (lazy) as a thin wrapper for elementwise ops only. The goal is to
-invert this: lazy evaluation should be the default, with eager kept only for niche
-use cases.
-
-Additionally, every tensor constructor creates its own `Graph`, causing redundant
-node copying via `import_subgraph` whenever tensors from different graphs interact.
+The guiding idea is:
+- Keep an inner kernel JIT (Cranelift for CPU; GPU compiler later).
+- Add an outer *graph JIT* that captures a whole execution plan once and
+  replays it many times.
 
 ---
 
-## Phase 0 — Fix Graph Allocation
+## Current State (as of today)
 
-**Problem:** `from_slice`, `from_tensor`, and `constant` each allocate a new
-`Graph`. A binary op between tensors from different graphs triggers
-`import_subgraph`, which deep-clones every node. For `a + b + c + d` from 4
-independent tensors, this creates 4 graphs and copies nodes from 3 of them.
+- `Tensor::realize()` rebuilds work every call:
+  - (optional) egglog optimize the root subgraph
+  - build a schedule
+  - execute the schedule
+- Kernel-level cache exists:
+  - Cranelift-compiled elementwise kernels are cached in `Context` keyed by
+    `KernelSignature`.
+- Shape ops and reduce ops are executed by interpreted CPU helpers when they
+  are not absorbed into a fused elementwise kernel.
 
-**Solution:** Introduce a shared `Graph` that tensors are created within.
-
-- Add a `Session` (or similar) that owns a single `Arc<Mutex<Graph>>`.
-- `Tensor::new`, `from_slice`, `constant` take a `&Session` and insert nodes into
-  the shared graph — no import needed.
-- Keep `import_subgraph` only for the rare case of merging tensors across sessions.
-- Alternatively, use a thread-local default graph (like PyTorch's approach) so the
-  API stays ergonomic without passing a session everywhere.
+This is correct, but training/inference will pay repeated overhead per step.
 
 ---
 
-## Phase 1 — Rename and Restructure
+## Phase 1 - Graph JIT (Execution Plan Cache) ✅
 
-- [ ] Rename `LTensor` → `Tensor` (the primary public type).
-- [ ] Rename `ETensor` → `EagerTensor`.
-- [ ] Update `lib.rs` to export `Tensor` as the default, `EagerTensor` secondary.
-- [ ] Update all examples and tests.
+Goal: cache the whole program for a root node so repeated `realize()` calls turn
+into: bind inputs, run `ExecItem`s, return output.
 
----
+Deliverables
 
-## Phase 2 — Decouple `realize()` from `EagerTensor`
+- [x] Introduce `ExecItem`:
+  - `Kernel { compiled, inputs, output, numel, dtype }`
+  - `Shape { op, input, output, input_shape, output_shape }`
+  - `Reduce { op, input, output, input_shape, output_shape }`
+  - `ConstFill { value, output, numel }`
 
-- [ ] Introduce `RealizedTensor` — a simple struct holding `Vec<f32>` + `Vec<usize>`
-      (data + shape, no strides/offset tricks).
-- [ ] `Tensor::realize()` returns `RealizedTensor` instead of `EagerTensor`.
-- [ ] Add `RealizedTensor::to_eager()` for users who need `EagerTensor` features.
-- [ ] This removes the lazy → eager hard dependency.
+- [x] Introduce `ExecutionPlan`:
+  - `exec_graph: Graph` (self-contained execution graph)
+  - `items: Vec<ExecItem>`
+  - `inputs: Vec<PlanInput>` (what buffers must be supplied at runtime)
+  - `output: NodeId`
+  - `output_shape: Vec<usize>`
 
----
+- [x] Introduce `GraphSignature`:
+  - Hash structural identity of the reachable program for a given root.
+  - Includes: op topology, dtypes, concrete shapes, op payloads, DAG structure.
 
-## Phase 3 — Add Shape Ops to the Graph
+- [x] Add `plan_cache` to `Context`:
+  - `HashMap<GraphSignature, Arc<ExecutionPlan>>`
 
-Add new `Op` variants so shape operations are lazy graph nodes:
+- [x] Refactor `Tensor::realize()`:
+  - Plan cache lookup via `GraphSignature`
+  - `build_plan()` on cache miss (builds exec graph, schedule, compiles kernels)
+  - `run_plan()` replays cached plan against stored exec graph
 
-- [ ] `Op::Reshape(Vec<usize>)`
-- [ ] `Op::Permute(Vec<usize>)`
-- [ ] `Op::Transpose(usize, usize)`
-- [ ] `Op::Expand(Vec<usize>)` (broadcasting)
-- [ ] `Op::Slice(Vec<(usize, usize)>)`
-- [ ] `Op::Flip(Vec<usize>)`
-- [ ] `Op::Squeeze` / `Op::Unsqueeze(usize)`
-- [ ] `Op::Pad(T, Vec<(usize, usize)>)`
+Correctness
 
-These don't need JIT codegen initially — the scheduler can realize them via the
-existing `Shape` logic. But having them in the graph enables egglog to optimize
-across shape+compute boundaries (e.g., reshape-of-reshape elimination).
+- [x] Validate runtime inputs against plan expectations (dtype + shape + device
+  once devices exist). If mismatch, build a new plan (new `GraphSignature`).
+- [ ] Detect alias hazards (input buffer also written later). Insert copies or
+  require distinct buffers.
 
----
+Performance
 
-## Phase 4 — Add Reduce Ops to the Graph
-
-- [ ] `Op::Sum(Vec<usize>, bool)` — dimensions + keepdims
-- [ ] `Op::Prod(Vec<usize>, bool)`
-- [ ] `Op::Max(Vec<usize>, bool)`
-- [ ] `Op::Min(Vec<usize>, bool)`
-- [ ] Scheduling: reductions become their own `ScheduleItem::Reduce` (not fused
-      with elementwise kernels, at least initially).
+- [x] Run egglog once per plan build, never per iteration.
+- [x] Ensure plan replay does not allocate per step except for outputs.
 
 ---
 
-## Phase 5 — Add Matmul and Conv to the Graph
+## Phase 2 - Buffer Pool + Memory Planning ✅
 
-- ./FUSION.md
+Goal: reduce allocation churn during repeated plan replay.
 
----
+- [x] Add `BufferPool`:
+  - Reuse allocations keyed by `(DType, numel)`.
+  - Shared via `Arc<Mutex<BufferPool>>` on `Context`.
+  - Kernel output byte buffers acquired from pool instead of fresh allocation.
 
-## Phase 6 — Multi-dtype Support
-
-- [ ] Extend `DType` with `F64`, `I32`, `I64`, `U8`, etc.
-- [ ] Extend `Buffer` accordingly.
-- [ ] Make `Tensor` carry a `DType` (not generic over `T` — use enum dispatch
-      like tinygrad/candle, not monomorphization like `EagerTensor<T>`).
-- [ ] Thread dtype through JIT codegen (Cranelift supports i32/i64/f64 natively).
-
----
-
-## Phase 7 — Feature-Gate Eager
-
-- [ ] Gate `mod eager` behind `#[cfg(feature = "eager")]`.
-- [ ] `EagerTensor` becomes opt-in for users who need stride tricks, in-place
-      mutation patterns, or non-JIT workflows.
-- [ ] Default `cargo add venum` gives only the lazy `Tensor`.
+- [x] Add simple lifetime-based reuse inside a plan:
+  - `compute_last_use()` tracks last step each intermediate is read.
+  - Dead intermediates removed from `realized` map after their last use.
+  - Pool `release()` available for future byte-level buffer recycling.
 
 ---
 
-## Order of Operations
+## Phase 3 - Fusion to Remove Shape/Reduce Barriers ✅
 
-```
-Phase 0 (graph allocation) — independent, do first for correctness/perf
-Phase 1 (rename) — small diff, sets the tone
-Phase 2 (decouple realize) — enables Phase 7
-Phase 3 (shape ops) — biggest user-facing win
-Phase 4 (reduce ops) — needed for real workloads
-Phase 5 (matmul/conv) — needed for real workloads
-Phase 6 (multi-dtype) — nice to have
-Phase 7 (feature-gate) — cleanup, do last
-```
+Goal: compile `Load -> shape ops -> elementwise -> reduce` into a single kernel
+where possible (no temp buffers, single pass), matching the spirit of tinygrad.
+
+- [x] Extend scheduler/kernel representation to include:
+  - `ReduceKind` enum (`Sum`, `Prod`, `Max`, `Min`)
+  - `ReduceSpec` struct (`op`, `dims`, `keepdims`)
+  - `FusedKernel` extended with `expr_root`, `iter_shape`, `reduce: Option<ReduceSpec>`
+  - per-input `ShapeTracker` index math for reduce-fused kernels
+
+- [x] Update Cranelift codegen to emit loop nests:
+  - Outer loop over output elements, inner loop over flattened reduce space
+  - `compose_iter_index` maps output + reduce indices to full iteration index
+  - `flatten_multi_index` converts multi-dim index to flat offset
+  - Proper identity values for sum/prod/max/min per dtype
+  - `emit_reduce_combine` for accumulator updates
+
+- [x] Scheduler fuses upstream into reduce kernels:
+  - Direct Load/Const inputs
+  - Shape op chains absorbed via `try_build_tracker`
+  - Single-consumer elementwise subtrees via `collect_kernel_inputs`
+  - Falls back to interpreted `ScheduleItem::Reduce` when fusion fails
+
+- [ ] Retire interpreted `ScheduleItem::Shape` and `ScheduleItem::Reduce`
+  (kept as fallback paths for now)
+
+---
+
+## Phase 4 - GPT-2 Inference Bucketing
+
+We accept padding/bucketing.
+
+- [ ] Prefill:
+  - Bucket `seq_len` (powers of two or a small fixed set).
+  - Pad + mask so shapes become stable and `plan_cache` hits are high.
+
+- [ ] Decode:
+  - Prefer a dedicated "one token" step plan.
+  - Avoid recompiling per token; treat cache position as data/offset math.
+
+---
+
+## Phase 5 - Backend Abstraction (CPU now, GPU later)
+
+Goal: make `ExecutionPlan` replay targetable to different backends.
+
+- [ ] Introduce a backend trait:
+  - compile lowered kernels
+  - execute kernels
+
+- [ ] CPU backend: keep Cranelift.
+- [ ] GPU backend later:
+  - compile kernels to device code
+  - optional graph batching (command buffers / CUDA graphs equivalent)
+
+---
+
+## Work Order
+
+1) Phase 1 (Graph JIT plan cache)
+2) Phase 2 (Buffer pool + memory planning)
+3) Phase 3 (Fuse shape+reduce into kernels)
+4) Phase 4 (Inference bucketing)
+5) Phase 5 (GPU backend scaffolding)

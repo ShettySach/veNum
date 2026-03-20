@@ -1,6 +1,7 @@
 mod compile;
 mod compiled;
 mod expr;
+mod index_map;
 mod math;
 mod signature;
 mod tracker;

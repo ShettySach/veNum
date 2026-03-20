@@ -73,7 +73,7 @@ impl Tensor {
             }
         }
 
-        let id = self.with_graph_mut(|g| g.expand(self.id, expansions.clone(), expansions.clone()));
+        let id = self.with_graph_mut(|g| g.expand(self.id, expansions.clone()));
         Ok(self.derived(id, expansions))
     }
 

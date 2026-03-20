@@ -1,9 +1,9 @@
-use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use super::super::graph::{Graph, NodeId, Op};
 use super::super::schedule::FusedKernel;
 use super::super::shape_tracker::ShapeTracker;
+use super::index_map::{build_input_index_map, id_to_index};
 
 // -------- kernel signature (structural identity for caching) --------
 
@@ -25,16 +25,24 @@ impl KernelSignature {
         kernel.numel.hash(&mut hasher);
         graph.node(kernel.root).dtype.hash(&mut hasher);
 
-        // Build input_index the same way compile_kernel does.
-        let mut input_index: HashMap<NodeId, usize> = HashMap::new();
-        for (i, &buf_id) in kernel.input_buffers.iter().enumerate() {
-            input_index.insert(buf_id, i);
+        // Hash iter_shape and reduce spec for reduce-fused kernels.
+        kernel.iter_shape.hash(&mut hasher);
+        if let Some(ref reduce) = kernel.reduce {
+            1u8.hash(&mut hasher);
+            reduce.op.hash(&mut hasher);
+            reduce.dims.hash(&mut hasher);
+            reduce.keepdims.hash(&mut hasher);
+        } else {
+            0u8.hash(&mut hasher);
         }
 
-        // Hash the expression tree structure.
+        // Build input_index the same way compile_kernel does.
+        let input_index = build_input_index_map(graph.nodes.len(), &kernel.input_buffers);
+
+        // Hash the expression tree structure (from expr_root, not root).
         hash_expr(
             graph,
-            kernel.root,
+            kernel.expr_root,
             &input_index,
             &kernel.input_trackers,
             &kernel.shape_source_map,
@@ -49,9 +57,9 @@ impl KernelSignature {
 fn hash_expr(
     graph: &Graph,
     id: NodeId,
-    input_index: &HashMap<NodeId, usize>,
-    trackers: &HashMap<NodeId, ShapeTracker>,
-    source_map: &HashMap<NodeId, NodeId>,
+    input_index: &[Option<usize>],
+    trackers: &[Option<ShapeTracker>],
+    source_map: &[Option<NodeId>],
     hasher: &mut impl Hasher,
 ) {
     let node = graph.node(id);
@@ -63,22 +71,22 @@ fn hash_expr(
         Op::Const(v) => v.hash(hasher),
         Op::Load => {
             // Leaf - hash its input index and any tracker.
-            let resolved = source_map.get(&id).copied().unwrap_or(id);
-            if let Some(&idx) = input_index.get(&resolved) {
+            let resolved = source_map[id_to_index(id)].unwrap_or(id);
+            if let Some(idx) = input_index[id_to_index(resolved)] {
                 0u8.hash(hasher); // tag: indexed input
                 idx.hash(hasher);
-                if let Some(tracker) = trackers.get(&resolved) {
+                if let Some(tracker) = trackers[id_to_index(resolved)].as_ref() {
                     hash_tracker(tracker, hasher);
                 }
             }
         }
         op if !op.is_elementwise() => {
             // Inlined shape op resolved to a source buffer.
-            let resolved = source_map.get(&id).copied().unwrap_or(id);
-            if let Some(&idx) = input_index.get(&resolved) {
+            let resolved = source_map[id_to_index(id)].unwrap_or(id);
+            if let Some(idx) = input_index[id_to_index(resolved)] {
                 1u8.hash(hasher); // tag: resolved shape op
                 idx.hash(hasher);
-                if let Some(tracker) = trackers.get(&resolved) {
+                if let Some(tracker) = trackers[id_to_index(resolved)].as_ref() {
                     hash_tracker(tracker, hasher);
                 }
             }
