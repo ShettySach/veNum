@@ -199,8 +199,7 @@ fn emit_elementwise_kernel(
             let Some(tracker) = tracker_opt else {
                 continue;
             };
-            let tracked_offset =
-                compute_tracker_byte_offset(builder, dims, tracker, elem_size);
+            let tracked_offset = compute_tracker_byte_offset(builder, dims, tracker, elem_size);
             tracked_byte_offsets[buf_idx] = Some(tracked_offset);
         }
     }
@@ -275,11 +274,7 @@ fn emit_reduce_kernel(
         is_reduce_dim[d] = true;
     }
 
-    let reduce_extents: Vec<usize> = reduce_spec
-        .dims
-        .iter()
-        .map(|&d| iter_shape[d])
-        .collect();
+    let reduce_extents: Vec<usize> = reduce_spec.dims.iter().map(|&d| iter_shape[d]).collect();
     let reduce_numel: usize = reduce_extents.iter().product();
     let reduce_numel_val = builder.ins().iconst(types::I64, reduce_numel as i64);
 
@@ -322,7 +317,9 @@ fn emit_reduce_kernel(
     builder.switch_to_block(red_header);
     let red_i = builder.block_params(red_header)[0];
     let acc = builder.block_params(red_header)[1];
-    let red_cmp = builder.ins().icmp(IntCC::UnsignedLessThan, red_i, reduce_numel_val);
+    let red_cmp = builder
+        .ins()
+        .icmp(IntCC::UnsignedLessThan, red_i, reduce_numel_val);
     builder.ins().brif(red_cmp, red_body, &[], red_exit, &[acc]);
 
     builder.switch_to_block(red_body);
@@ -352,8 +349,7 @@ fn emit_reduce_kernel(
         let Some(tracker) = tracker_opt else {
             continue;
         };
-        let tracked_offset =
-            compute_tracker_byte_offset(builder, &iter_idx, tracker, elem_size);
+        let tracked_offset = compute_tracker_byte_offset(builder, &iter_idx, tracker, elem_size);
         tracked_byte_offsets[buf_idx] = Some(tracked_offset);
     }
 
@@ -507,9 +503,7 @@ fn compose_iter_index(
     if keepdims {
         // Output rank == iter_rank. Reduce dims have size 1 in output.
         let mut red_pos = 0;
-        let is_reduce: Vec<bool> = (0..iter_rank)
-            .map(|d| reduce_dims.contains(&d))
-            .collect();
+        let is_reduce: Vec<bool> = (0..iter_rank).map(|d| reduce_dims.contains(&d)).collect();
         for d in 0..iter_rank {
             if is_reduce[d] {
                 result[d] = red_idx[red_pos];
@@ -520,9 +514,7 @@ fn compose_iter_index(
         }
     } else {
         // Output rank < iter_rank. Reduced dims are absent from output.
-        let is_reduce: Vec<bool> = (0..iter_rank)
-            .map(|d| reduce_dims.contains(&d))
-            .collect();
+        let is_reduce: Vec<bool> = (0..iter_rank).map(|d| reduce_dims.contains(&d)).collect();
         let mut out_pos = 0;
         let mut red_pos = 0;
         for d in 0..iter_rank {

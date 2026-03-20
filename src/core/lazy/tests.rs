@@ -3,10 +3,6 @@ mod lazy_tests {
     use crate::{Context, Tensor};
     use anyhow::Result;
 
-    fn approx_eq(a: &[f32], b: &[f32], eps: f32) -> bool {
-        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < eps)
-    }
-
     #[test]
     fn realize_leaf() -> Result<()> {
         let cx = Context::new();
@@ -97,7 +93,7 @@ mod lazy_tests {
         let result = a.exp()?.realize()?;
 
         let expected: Vec<f32> = [0.0f32, 1.0, 2.0].iter().map(|x| x.exp()).collect();
-        assert!(approx_eq(&result.data(), &expected, 1e-5));
+        assert_eq!(&result.data(), &expected);
         Ok(())
     }
 
@@ -112,7 +108,7 @@ mod lazy_tests {
             .iter()
             .map(|x| x.ln())
             .collect();
-        assert!(approx_eq(&result.data(), &expected, 1e-4));
+        assert_eq!(result.data(), &expected);
         Ok(())
     }
 
@@ -260,7 +256,7 @@ mod lazy_tests {
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0], vec![3]);
         // exp(ln(a)) should be optimized to just a.
         let result = a.ln()?.exp()?.realize()?;
-        assert!(approx_eq(&result.data(), &[1.0, 2.0, 3.0], 1e-5));
+        assert_eq!(result.data(), &[1.0, 2.0, 3.0]);
         Ok(())
     }
 

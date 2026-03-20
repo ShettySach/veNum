@@ -1,8 +1,8 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 
-use super::super::context::Context;
-use super::super::dtype::{Buffer, DType, Scalar};
-use super::Tensor;
+use crate::core::errors::*;
+
+use super::{Buffer, Context, DType, Scalar, Tensor};
 
 impl Tensor {
     pub fn from_slice(cx: &Context, data: &[f32], shape: Vec<usize>) -> Self {
@@ -10,10 +10,7 @@ impl Tensor {
         let graph = cx.graph();
         let id = graph.lock().unwrap().load(buffer, shape.clone());
         Self {
-            graph,
-            kernel_cache: cx.kernel_cache(),
-            plan_cache: cx.plan_cache(),
-            buffer_pool: cx.buffer_pool(),
+            cx: cx.clone(),
             id,
             shape,
             dtype: DType::F32,
@@ -25,10 +22,7 @@ impl Tensor {
         let graph = cx.graph();
         let id = graph.lock().unwrap().load(buffer, shape.clone());
         Self {
-            graph,
-            kernel_cache: cx.kernel_cache(),
-            plan_cache: cx.plan_cache(),
-            buffer_pool: cx.buffer_pool(),
+            cx: cx.clone(),
             id,
             shape,
             dtype: DType::F64,
@@ -40,10 +34,7 @@ impl Tensor {
         let graph = cx.graph();
         let id = graph.lock().unwrap().load(buffer, shape.clone());
         Self {
-            graph,
-            kernel_cache: cx.kernel_cache(),
-            plan_cache: cx.plan_cache(),
-            buffer_pool: cx.buffer_pool(),
+            cx: cx.clone(),
             id,
             shape,
             dtype: DType::I32,
@@ -55,10 +46,7 @@ impl Tensor {
         let graph = cx.graph();
         let id = graph.lock().unwrap().load(buffer, shape.clone());
         Self {
-            graph,
-            kernel_cache: cx.kernel_cache(),
-            plan_cache: cx.plan_cache(),
-            buffer_pool: cx.buffer_pool(),
+            cx: cx.clone(),
             id,
             shape,
             dtype: DType::I64,
@@ -72,10 +60,7 @@ impl Tensor {
             .unwrap()
             .constant(Scalar::F32(value), shape.clone());
         Self {
-            graph,
-            kernel_cache: cx.kernel_cache(),
-            plan_cache: cx.plan_cache(),
-            buffer_pool: cx.buffer_pool(),
+            cx: cx.clone(),
             id,
             shape,
             dtype: DType::F32,
@@ -87,10 +72,7 @@ impl Tensor {
         let graph = cx.graph();
         let id = graph.lock().unwrap().constant(value, shape.clone());
         Self {
-            graph,
-            kernel_cache: cx.kernel_cache(),
-            plan_cache: cx.plan_cache(),
-            buffer_pool: cx.buffer_pool(),
+            cx: cx.clone(),
             id,
             shape,
             dtype,
@@ -101,28 +83,19 @@ impl Tensor {
         use std::cmp::Ordering;
         use std::iter::successors;
 
-        let ascending = match step
-            .partial_cmp(&0.0)
-            .ok_or(anyhow!("Cannot compare step value"))?
-        {
+        let ascending = match step.partial_cmp(&0.0).ok_or(ArangeError::Comparison)? {
             Ordering::Greater if end > start => Ok(true),
             Ordering::Less if start > end => Ok(false),
-            Ordering::Greater => Err(anyhow!("step is positive but end <= start")),
-            Ordering::Less => Err(anyhow!("step is negative but start <= end")),
-            Ordering::Equal => Err(anyhow!("step cannot be zero")),
+            Ordering::Greater => Err(ArangeError::Positive),
+            Ordering::Less => Err(ArangeError::Negative),
+            Ordering::Equal => Err(ArangeError::Zero),
         }?;
 
-        let sign = if ascending { 1.0 } else { -1.0 };
-        let scaled_step = step * sign;
-        let scaled_start = start * sign;
-        let scaled_end = end * sign;
-
-        let data: Vec<f32> = successors(Some(scaled_start), |&prev| {
-            let curr = prev + scaled_step;
-            let cond = scaled_end > curr;
+        let data: Vec<_> = successors(Some(start), |&prev| {
+            let curr = prev + step;
+            let cond = end > curr;
             (ascending == cond).then_some(curr)
         })
-        .map(|v| v * sign)
         .collect();
 
         let shape = vec![data.len()];

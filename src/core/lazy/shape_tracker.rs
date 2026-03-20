@@ -1,16 +1,22 @@
-/// A ShapeTracker represents a virtual view of a flat buffer.
-///
-/// It tracks how a sequence of shape ops (reshape, expand, permute, etc.)
-/// transforms a logical multi-dimensional index into a physical flat offset,
-/// without materializing any intermediate buffers.
 #[derive(Clone, Debug)]
 pub struct ShapeTracker {
-    /// Current logical shape.
     pub shape: Vec<usize>,
-    /// Stride per dimension. 0 means broadcast (expand).
     pub strides: Vec<isize>,
-    /// Base offset into the underlying buffer.
     pub offset: isize,
+}
+
+fn row_major_strides(shape: &[usize]) -> Vec<isize> {
+    let mut strides: Vec<isize> = shape
+        .iter()
+        .rev()
+        .scan(1isize, |acc, &s| {
+            let v = *acc;
+            *acc *= s as isize;
+            Some(v)
+        })
+        .collect();
+    strides.reverse();
+    strides
 }
 
 impl ShapeTracker {
@@ -166,21 +172,6 @@ impl ShapeTracker {
     pub fn numel(&self) -> usize {
         self.shape.iter().product()
     }
-}
-
-/// Compute row-major strides for a shape.
-fn row_major_strides(shape: &[usize]) -> Vec<isize> {
-    let mut strides: Vec<isize> = shape
-        .iter()
-        .rev()
-        .scan(1isize, |acc, &s| {
-            let v = *acc;
-            *acc *= s as isize;
-            Some(v)
-        })
-        .collect();
-    strides.reverse();
-    strides
 }
 
 #[cfg(test)]

@@ -153,3 +153,7 @@ Goal: make `ExecutionPlan` replay targetable to different backends.
 3) Phase 3 (Fuse shape+reduce into kernels)
 4) Phase 4 (Inference bucketing)
 5) Phase 5 (GPU backend scaffolding)
+
+## Possible Refactors
+
+- &Context in Tensor. Tensor has the lifetime of the context right.

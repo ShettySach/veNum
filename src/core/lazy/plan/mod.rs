@@ -4,5 +4,5 @@ mod graph_signature;
 
 pub use buffer_pool::BufferPool;
 #[allow(unused_imports)]
-pub use exec_plan::{ExecItem, ExecutionPlan, PlanInput};
+pub use exec_plan::{ExecItem, ExecutionPlan};
 pub use graph_signature::GraphSignature;

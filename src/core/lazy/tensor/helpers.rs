@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use anyhow::{bail, Result};
 
 use super::super::graph::{Graph, Node, NodeId, Op};
@@ -10,9 +12,9 @@ pub(super) fn clone_reachable_subgraph(src: &Graph, root: NodeId) -> (Graph, Nod
 pub(super) fn clone_reachable_subgraph_with_map(
     src: &Graph,
     root: NodeId,
-) -> (Graph, NodeId, std::collections::HashMap<NodeId, NodeId>) {
+) -> (Graph, NodeId, HashMap<NodeId, NodeId>) {
     let mut dst = Graph::new();
-    let mut id_map = std::collections::HashMap::new();
+    let mut id_map = HashMap::new();
     let new_root = import_node(src, root, &mut dst, &mut id_map);
     (dst, new_root, id_map)
 }
@@ -23,31 +25,28 @@ pub(super) fn is_optimize_safe(graph: &Graph, root: NodeId) -> bool {
         return false;
     }
 
-    fn dfs(graph: &Graph, id: NodeId, seen: &mut std::collections::HashSet<NodeId>) -> bool {
+    fn dfs(graph: &Graph, id: NodeId, seen: &mut HashSet<NodeId>) -> bool {
         if !seen.insert(id) {
             return true;
         }
+
         let node = graph.node(id);
-        let here_ok = matches!(
-            node.op,
+        match node.op {
             Op::Load
-                | Op::Const(_)
-                | Op::Add
-                | Op::Sub
-                | Op::Mul
-                | Op::Div
-                | Op::Exp
-                | Op::Ln
-                | Op::Sqrt
-                | Op::Neg
-        );
-        if !here_ok {
-            return false;
+            | Op::Const(_)
+            | Op::Add
+            | Op::Sub
+            | Op::Mul
+            | Op::Div
+            | Op::Exp
+            | Op::Ln
+            | Op::Sqrt
+            | Op::Neg => node.inputs.iter().all(|&inp| dfs(graph, inp, seen)),
+            _ => false,
         }
-        node.inputs.iter().all(|&inp| dfs(graph, inp, seen))
     }
 
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = HashSet::new();
     dfs(graph, root, &mut seen)
 }
 
@@ -77,7 +76,7 @@ fn import_node(
     src_graph: &Graph,
     src_id: NodeId,
     dst_graph: &mut Graph,
-    id_map: &mut std::collections::HashMap<NodeId, NodeId>,
+    id_map: &mut HashMap<NodeId, NodeId>,
 ) -> NodeId {
     if let Some(&mapped) = id_map.get(&src_id) {
         return mapped;

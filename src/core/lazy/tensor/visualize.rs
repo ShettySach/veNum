@@ -6,17 +6,20 @@ use super::Tensor;
 
 impl Tensor {
     pub fn render_dag(&self) -> String {
-        let graph = self.graph.lock().unwrap();
+        let graph_handle = self.cx.graph();
+        let graph = graph_handle.lock().unwrap();
         render::render_dag(&graph, self.id)
     }
 
     pub fn render_fused_dag(&self) -> String {
-        let graph = self.graph.lock().unwrap();
+        let graph_handle = self.cx.graph();
+        let graph = graph_handle.lock().unwrap();
         render::render_fused_dag(&graph, self.id)
     }
 
     pub fn render_optimized_dag(&self) -> Result<String> {
-        let graph = self.graph.lock().unwrap();
+        let graph_handle = self.cx.graph();
+        let graph = graph_handle.lock().unwrap();
         if !is_optimize_safe(&graph, self.id) {
             return Ok(render::render_dag(&graph, self.id));
         }
@@ -25,7 +28,8 @@ impl Tensor {
     }
 
     pub fn render_optimized_fused_dag(&self) -> Result<String> {
-        let graph = self.graph.lock().unwrap();
+        let graph_handle = self.cx.graph();
+        let graph = graph_handle.lock().unwrap();
         if !is_optimize_safe(&graph, self.id) {
             return Ok(render::render_fused_dag(&graph, self.id));
         }
@@ -39,7 +43,8 @@ impl Tensor {
         use super::super::jit::compile_kernel;
         use super::super::schedule::{build_schedule, ScheduleItem};
 
-        let graph = self.graph.lock().unwrap();
+        let graph_handle = self.cx.graph();
+        let graph = graph_handle.lock().unwrap();
         let optimize_safe = is_optimize_safe(&graph, self.id);
         let (exec_graph, exec_root) = if optimize_safe {
             optimize::optimize(&graph, self.id)?

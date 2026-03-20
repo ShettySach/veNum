@@ -69,12 +69,9 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
                     } else if expr_node.op.is_shape_op() {
                         // Shape op chain: try to absorb via tracker, with the
                         // source Load becoming the input buffer.
-                        if let Some((source, tracker, chain)) = try_build_tracker(
-                            graph,
-                            expr_input,
-                            &consumer_counts,
-                            &iter_shape,
-                        ) {
+                        if let Some((source, tracker, chain)) =
+                            try_build_tracker(graph, expr_input, &consumer_counts, &iter_shape)
+                        {
                             for &shape_id in &chain {
                                 inlined.insert(shape_id);
                                 if shape_source_map[shape_id.0].is_none() {
