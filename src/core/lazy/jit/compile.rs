@@ -58,11 +58,11 @@ pub fn compile_kernel(
     let math_ids = declare_math_funcs(&mut module)?;
 
     // --- Build kernel function signature ---
-    // fn(in0: *u8, in1: *u8, ..., out: *mut u8, n: u64)
+    // ABI:
+    //   fn(inputs: *const *const u8, out: *mut u8, n: u64)
+    // The first parameter points to an array of `num_inputs` pointers.
     let mut sig = module.make_signature();
-    for _ in 0..num_inputs {
-        sig.params.push(AbiParam::new(ptr_type));
-    }
+    sig.params.push(AbiParam::new(ptr_type)); // inputs pointer array
     sig.params.push(AbiParam::new(ptr_type)); // output pointer
     sig.params.push(AbiParam::new(types::I64)); // n
 
@@ -85,9 +85,21 @@ pub fn compile_kernel(
 
     // Extract parameters.
     let block_params: Vec<Value> = builder.block_params(entry_block).to_vec();
-    let input_ptrs: Vec<Value> = block_params[..num_inputs].to_vec();
-    let out_ptr = block_params[num_inputs];
-    let n_param = block_params[num_inputs + 1];
+    let inputs_ptr = block_params[0];
+    let out_ptr = block_params[1];
+    let n_param = block_params[2];
+
+    // Load input pointers from the inputs array.
+    let ptr_size = module.target_config().pointer_bytes() as i64;
+    let mut input_ptrs = Vec::with_capacity(num_inputs);
+    for i in 0..num_inputs {
+        let off = builder
+            .ins()
+            .iconst(ptr_type, (i as i64).wrapping_mul(ptr_size));
+        let addr = builder.ins().iadd(inputs_ptr, off);
+        let p = builder.ins().load(ptr_type, MemFlags::new(), addr, 0);
+        input_ptrs.push(p);
+    }
 
     if kernel.reduce.is_some() {
         emit_reduce_kernel(
