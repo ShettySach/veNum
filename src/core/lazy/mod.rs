@@ -1,8 +1,10 @@
+mod backend;
 mod context;
 mod dtype;
 mod exec;
 mod graph;
 mod jit;
+mod kernel;
 mod optimize;
 mod plan;
 mod render;

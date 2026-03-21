@@ -19,6 +19,7 @@ fn main() -> anyhow::Result<()> {
 
     println!("{}", z.render_dag());
     println!("{}", z.render_fused_dag());
+    println!("{}", z.render_kernels()?);
 
     Ok(())
 }

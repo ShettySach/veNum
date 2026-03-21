@@ -7,5 +7,4 @@ mod signature;
 mod tracker;
 
 pub use compile::compile_kernel;
-pub use compiled::CompiledKernel;
 pub use signature::KernelSignature;

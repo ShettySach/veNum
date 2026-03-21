@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use super::backend::{Backend, CpuBackend};
 use super::graph::Graph;
-use super::jit::{CompiledKernel, KernelSignature};
+use super::jit::KernelSignature;
+use super::kernel::ExecutableKernel;
 use super::plan::{BufferPool, ExecutionPlan, GraphSignature};
 
 /// Cache of JIT-compiled kernels keyed by structural signature.
-pub(crate) type KernelCache = Arc<Mutex<HashMap<KernelSignature, Arc<CompiledKernel>>>>;
+pub(crate) type KernelCache = Arc<Mutex<HashMap<KernelSignature, Arc<dyn ExecutableKernel>>>>;
 
 /// Cache of execution plans keyed by graph signature.
 pub(crate) type PlanCache = Arc<Mutex<HashMap<GraphSignature, Arc<ExecutionPlan>>>>;
@@ -27,6 +29,7 @@ pub struct Context {
     kernel_cache: KernelCache,
     plan_cache: PlanCache,
     buffer_pool: SharedBufferPool,
+    backend: Arc<dyn Backend>,
 }
 
 impl Default for Context {
@@ -43,6 +46,18 @@ impl Context {
             kernel_cache: Arc::new(Mutex::new(HashMap::new())),
             plan_cache: Arc::new(Mutex::new(HashMap::new())),
             buffer_pool: Arc::new(Mutex::new(BufferPool::new())),
+            backend: Arc::new(CpuBackend::default()),
+        }
+    }
+
+    /// Create a new lazy context with a specific backend.
+    pub fn with_backend(backend: Arc<dyn Backend>) -> Self {
+        Self {
+            graph: Arc::new(Mutex::new(Graph::new())),
+            kernel_cache: Arc::new(Mutex::new(HashMap::new())),
+            plan_cache: Arc::new(Mutex::new(HashMap::new())),
+            buffer_pool: Arc::new(Mutex::new(BufferPool::new())),
+            backend,
         }
     }
 
@@ -64,5 +79,9 @@ impl Context {
     /// Get a clone of the shared buffer pool handle.
     pub(crate) fn buffer_pool(&self) -> SharedBufferPool {
         Arc::clone(&self.buffer_pool)
+    }
+
+    pub(crate) fn backend(&self) -> Arc<dyn Backend> {
+        Arc::clone(&self.backend)
     }
 }

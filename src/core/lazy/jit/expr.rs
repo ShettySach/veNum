@@ -28,8 +28,7 @@ pub(super) fn build_expression(
             if let Some(idx) = input_index[id_to_index(resolved_id)] {
                 // Source is a buffer input — load via tracked or flat offset.
                 let ptr = input_ptrs[idx];
-                let offset =
-                    tracked_byte_offsets[id_to_index(resolved_id)].unwrap_or(byte_offset);
+                let offset = tracked_byte_offsets[id_to_index(resolved_id)].unwrap_or(byte_offset);
                 let addr = builder.ins().iadd(ptr, offset);
                 Ok(builder.ins().load(cl_type, MemFlags::new(), addr, 0))
             } else {

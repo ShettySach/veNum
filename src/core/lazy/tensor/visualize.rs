@@ -40,7 +40,6 @@ impl Tensor {
     pub fn render_kernels(&self) -> Result<String> {
         use std::fmt::Write;
 
-        use super::super::jit::compile_kernel;
         use super::super::schedule::{build_schedule, ScheduleItem};
 
         let graph_handle = self.cx.graph();
@@ -99,19 +98,18 @@ impl Tensor {
                         .unwrap();
                     }
 
-                    match compile_kernel(&exec_graph, kernel, true) {
+                    let backend = self.cx.backend();
+                    match backend.compile(&exec_graph, kernel, true) {
                         Ok(compiled) => {
-                            if let Some(ref ir) = compiled.clif_ir {
-                                writeln!(out, "\n    --- CLIF IR ---").unwrap();
+                            if let Some(ir) = compiled.debug_ir() {
+                                writeln!(out, "\n    --- IR ---").unwrap();
                                 for line in ir.lines() {
                                     writeln!(out, "    {}", line).unwrap();
                                 }
                             }
                         }
-                        Err(e) => {
-                            writeln!(out, "    (compilation error: {})", e).unwrap();
-                        }
-                    }
+                        Err(e) => writeln!(out, "    (compilation error: {})", e).unwrap(),
+                    };
                 }
             }
         }

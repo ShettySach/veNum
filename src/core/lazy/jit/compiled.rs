@@ -106,3 +106,17 @@ impl CompiledKernel {
         }
     }
 }
+
+impl crate::core::lazy::kernel::ExecutableKernel for CompiledKernel {
+    fn num_inputs(&self) -> usize {
+        self.num_inputs
+    }
+
+    fn debug_ir(&self) -> Option<String> {
+        self.clif_ir.clone()
+    }
+
+    unsafe fn execute(&self, inputs: &[*const u8], output: *mut u8, numel: usize) {
+        CompiledKernel::execute(self, inputs, output, numel)
+    }
+}

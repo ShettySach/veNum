@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use super::super::dtype::Scalar;
 use super::super::graph::{Graph, NodeId, Op};
-use super::super::jit::CompiledKernel;
+use super::super::kernel::ExecutableKernel;
 
 /// A single step in a cached execution plan.
 pub enum ExecItem {
     /// Execute a JIT-compiled fused elementwise kernel.
     Kernel {
-        compiled: Arc<CompiledKernel>,
+        kernel: Arc<dyn ExecutableKernel>,
         /// Node IDs of input buffers (in the execution graph).
         inputs: Vec<NodeId>,
         /// Node ID of the output buffer.

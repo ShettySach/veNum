@@ -1,11 +1,13 @@
 use anyhow::{anyhow, bail, Result};
 use std::sync::Arc;
 
+use super::super::backend::Backend;
 use super::super::context::SharedBufferPool;
 use super::super::dtype::{Buffer, RealizedTensor};
 use super::super::exec;
 use super::super::graph::{Graph, NodeId, Op};
-use super::super::jit::{compile_kernel, KernelSignature};
+use super::super::jit::KernelSignature;
+use super::super::kernel::ExecutableKernel;
 use super::super::optimize;
 use super::super::plan::{ExecItem, ExecutionPlan, GraphSignature};
 use super::super::schedule::{build_schedule, ScheduleItem};
@@ -47,7 +49,14 @@ impl Tensor {
         };
         drop(graph);
 
-        let plan = build_plan(exec_graph, exec_root, &self.cx.kernel_cache(), &self.shape)?;
+        let backend = self.cx.backend();
+        let plan = build_plan(
+            exec_graph,
+            exec_root,
+            &self.cx.kernel_cache(),
+            backend.as_ref(),
+            &self.shape,
+        )?;
         let plan = Arc::new(plan);
 
         // Cache the plan.
@@ -66,8 +75,9 @@ fn build_plan(
     exec_graph: Graph,
     root: NodeId,
     kernel_cache: &std::sync::Mutex<
-        std::collections::HashMap<KernelSignature, Arc<super::super::jit::CompiledKernel>>,
+        std::collections::HashMap<KernelSignature, Arc<dyn ExecutableKernel>>,
     >,
+    backend: &dyn Backend,
     tensor_shape: &[usize],
 ) -> Result<ExecutionPlan> {
     let root_node = exec_graph.node(root);
@@ -111,14 +121,14 @@ fn build_plan(
                     if let Some(cached) = cache.get(&sig) {
                         Arc::clone(cached)
                     } else {
-                        let compiled = Arc::new(compile_kernel(&exec_graph, kernel, false)?);
+                        let compiled = backend.compile(&exec_graph, kernel, false)?;
                         cache.insert(sig, Arc::clone(&compiled));
                         compiled
                     }
                 };
 
                 items.push(ExecItem::Kernel {
-                    compiled,
+                    kernel: compiled,
                     inputs: kernel.input_buffers.clone(),
                     output: kernel.root,
                 });
@@ -192,7 +202,7 @@ fn run_plan(plan: &ExecutionPlan, pool: &SharedBufferPool) -> Result<RealizedTen
     for (step, item) in plan.items.iter().enumerate() {
         match item {
             ExecItem::Kernel {
-                compiled,
+                kernel,
                 inputs,
                 output,
             } => {
@@ -217,7 +227,7 @@ fn run_plan(plan: &ExecutionPlan, pool: &SharedBufferPool) -> Result<RealizedTen
 
                 let mut output_bytes = pool.lock().unwrap().acquire(dtype, numel);
                 unsafe {
-                    compiled.execute(&input_ptrs, output_bytes.as_mut_ptr(), numel);
+                    kernel.execute(&input_ptrs, output_bytes.as_mut_ptr(), numel);
                 }
                 realized.insert(*output, exec::buffer_from_bytes(output_bytes, dtype));
             }
