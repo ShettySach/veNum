@@ -171,13 +171,11 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
                 &output_shape,
             );
 
-            // Remove any previously emitted Shape items that were absorbed.
-            schedule.retain(|item| {
-                if let ScheduleItem::Shape(s) = item {
-                    !inlined.contains(&s.root)
-                } else {
-                    true
-                }
+            // Remove previously emitted items whose roots were absorbed.
+            schedule.retain(|item| match item {
+                ScheduleItem::Shape(s) => !inlined.contains(&s.root),
+                ScheduleItem::Fused(k) => !inlined.contains(&k.root),
+                _ => true,
             });
 
             schedule.push(ScheduleItem::Fused(FusedKernel {

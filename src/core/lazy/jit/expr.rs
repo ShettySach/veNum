@@ -25,12 +25,30 @@ pub(super) fn build_expression(
     match &node.op {
         op if !op.is_elementwise() && !matches!(op, Op::Const(_)) => {
             let resolved_id = shape_source_map[id_to_index(id)].unwrap_or(id);
-            let idx = input_index[id_to_index(resolved_id)]
-                .ok_or_else(|| anyhow::anyhow!("Barrier node {:?} not found in input_index", id))?;
-            let ptr = input_ptrs[idx];
-            let offset = tracked_byte_offsets[id_to_index(resolved_id)].unwrap_or(byte_offset);
-            let addr = builder.ins().iadd(ptr, offset);
-            Ok(builder.ins().load(cl_type, MemFlags::new(), addr, 0))
+            if let Some(idx) = input_index[id_to_index(resolved_id)] {
+                // Source is a buffer input — load via tracked or flat offset.
+                let ptr = input_ptrs[idx];
+                let offset =
+                    tracked_byte_offsets[id_to_index(resolved_id)].unwrap_or(byte_offset);
+                let addr = builder.ins().iadd(ptr, offset);
+                Ok(builder.ins().load(cl_type, MemFlags::new(), addr, 0))
+            } else {
+                // Source was inlined through a contiguous shape op chain —
+                // recursively evaluate its expression tree.
+                build_expression(
+                    graph,
+                    resolved_id,
+                    builder,
+                    input_ptrs,
+                    input_index,
+                    byte_offset,
+                    math,
+                    tracked_byte_offsets,
+                    shape_source_map,
+                    dtype,
+                    cl_type,
+                )
+            }
         }
         Op::Load => {
             let idx = input_index[id_to_index(id)]

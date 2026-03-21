@@ -106,14 +106,40 @@ pub(super) fn collect_kernel_inputs(
                     source_map[shape_id.0] = Some(source);
                 }
 
-                // The source becomes a kernel input with a tracker.
-                if !inputs.contains(&source) {
-                    inputs.push(source);
+                // If the tracker is contiguous, the source's elements map 1:1
+                // to the kernel's flat iteration. If the source is also a
+                // single-consumer elementwise op with matching numel, we can
+                // inline its expression tree instead of materializing a buffer.
+                let source_node = graph.node(source);
+                let can_inline_source = tracker.is_contiguous()
+                    && source_node.op.is_elementwise()
+                    && *consumer_counts.get(&source).unwrap_or(&0) == 1
+                    && source_node.numel() == node.numel();
+
+                if can_inline_source {
+                    inlined.insert(source);
+                    collect_kernel_inputs(
+                        graph,
+                        source,
+                        consumer_counts,
+                        inlined,
+                        inputs,
+                        trackers,
+                        source_map,
+                        num_tracked_inputs,
+                        num_absorbed_shape_ops,
+                        output_shape,
+                    );
+                } else {
+                    // The source becomes a kernel input with a tracker.
+                    if !inputs.contains(&source) {
+                        inputs.push(source);
+                    }
+                    if trackers[source.0].is_none() {
+                        *num_tracked_inputs += 1;
+                    }
+                    trackers[source.0] = Some(tracker);
                 }
-                if trackers[source.0].is_none() {
-                    *num_tracked_inputs += 1;
-                }
-                trackers[source.0] = Some(tracker);
                 continue;
             }
         }

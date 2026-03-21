@@ -185,8 +185,17 @@ fn emit_elementwise_kernel(
     let elem_size_val = builder.ins().iconst(types::I64, elem_size);
     let byte_offset = builder.ins().imul(i, elem_size_val);
 
-    // If we have trackers, decompose flat index `i` into multi-dim indices.
-    let dim_indices = if has_trackers {
+    // Check if any tracker is non-contiguous and actually needs index
+    // decomposition. Contiguous trackers can just use the flat byte offset.
+    let needs_decompose = has_trackers
+        && kernel
+            .input_trackers
+            .iter()
+            .any(|t| t.as_ref().is_some_and(|tr| !tr.is_contiguous()));
+
+    // If we have non-contiguous trackers, decompose flat index `i` into
+    // multi-dim indices. Contiguous trackers reuse the flat byte offset.
+    let dim_indices = if needs_decompose {
         Some(decompose_flat_index(builder, i, &kernel.output_shape))
     } else {
         None
@@ -194,11 +203,14 @@ fn emit_elementwise_kernel(
 
     // Pre-compute per-input byte offsets from trackers.
     let mut tracked_byte_offsets: Vec<Option<Value>> = vec![None; graph.nodes.len()];
-    if let Some(ref dims) = dim_indices {
-        for (buf_idx, tracker_opt) in kernel.input_trackers.iter().enumerate() {
-            let Some(tracker) = tracker_opt else {
-                continue;
-            };
+    for (buf_idx, tracker_opt) in kernel.input_trackers.iter().enumerate() {
+        let Some(tracker) = tracker_opt else {
+            continue;
+        };
+        if tracker.is_contiguous() {
+            // Contiguous tracker: flat offset is equivalent, no decomposition needed.
+            tracked_byte_offsets[buf_idx] = Some(byte_offset);
+        } else if let Some(ref dims) = dim_indices {
             let tracked_offset = compute_tracker_byte_offset(builder, dims, tracker, elem_size);
             tracked_byte_offsets[buf_idx] = Some(tracked_offset);
         }

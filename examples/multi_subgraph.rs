@@ -21,10 +21,10 @@ fn main() -> anyhow::Result<()> {
     // Final combination: w3 + x3 -> [2,2]
     let y = (&w3 + &x3)?;
 
-    println!("=== RAW DAG ===");
+    println!("RAW DAG");
     println!("{}", y.render_dag());
     println!();
-    println!("=== FUSED DAG ===");
+    println!("FUSED DAG");
     println!("{}", y.render_fused_dag());
 
     Ok(())

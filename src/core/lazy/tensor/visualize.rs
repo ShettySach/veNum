@@ -37,6 +37,12 @@ impl Tensor {
         Ok(render::render_fused_dag(&opt_graph, opt_root))
     }
 
+    pub fn render_node_ir(&self) -> String {
+        let graph_handle = self.cx.graph();
+        let graph = graph_handle.lock().unwrap();
+        render::render_node_ir(&graph, self.id)
+    }
+
     pub fn render_kernels(&self) -> Result<String> {
         use std::fmt::Write;
 
