@@ -226,9 +226,7 @@ fn run_plan(plan: &ExecutionPlan, pool: &SharedBufferPool) -> Result<RealizedTen
                     .collect::<Result<Vec<_>>>()?;
 
                 let mut output_bytes = pool.lock().unwrap().acquire(dtype, numel);
-                unsafe {
-                    kernel.execute(&input_ptrs, output_bytes.as_mut_ptr(), numel);
-                }
+                kernel.execute(&input_ptrs, output_bytes.as_mut_ptr(), numel);
                 realized.insert(*output, exec::buffer_from_bytes(output_bytes, dtype));
             }
             ExecItem::Shape { op, input, output } => {

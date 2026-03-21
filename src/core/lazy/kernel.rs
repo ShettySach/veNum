@@ -12,8 +12,5 @@ pub trait ExecutableKernel: Send + Sync {
     }
 
     /// Execute the kernel.
-    ///
-    /// # Safety
-    /// Inputs and output must point to valid buffers of sufficient size.
-    unsafe fn execute(&self, inputs: &[*const u8], output: *mut u8, numel: usize);
+    fn execute(&self, inputs: &[*const u8], output: *mut u8, numel: usize);
 }

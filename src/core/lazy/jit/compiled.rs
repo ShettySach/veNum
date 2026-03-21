@@ -116,7 +116,16 @@ impl crate::core::lazy::kernel::ExecutableKernel for CompiledKernel {
         self.clif_ir.clone()
     }
 
-    unsafe fn execute(&self, inputs: &[*const u8], output: *mut u8, numel: usize) {
-        CompiledKernel::execute(self, inputs, output, numel)
+    fn execute(&self, inputs: &[*const u8], output: *mut u8, numel: usize) {
+        debug_assert_eq!(
+            inputs.len(),
+            self.num_inputs,
+            "Kernel expected {} inputs, got {}",
+            self.num_inputs,
+            inputs.len()
+        );
+        // Safety: callers must provide valid pointers; we concentrate the
+        // JIT call unsafety inside the CPU kernel implementation.
+        unsafe { CompiledKernel::execute(self, inputs, output, numel) }
     }
 }

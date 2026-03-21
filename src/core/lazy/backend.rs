@@ -20,10 +20,7 @@ pub trait Backend: Send + Sync {
     ) -> Result<Arc<dyn ExecutableKernel>>;
 
     /// Execute a compiled kernel.
-    ///
-    /// # Safety
-    /// Inputs and output must point to valid buffers of sufficient size.
-    unsafe fn execute(
+    fn execute(
         &self,
         kernel: &dyn ExecutableKernel,
         inputs: &[*const u8],

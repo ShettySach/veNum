@@ -17,9 +17,9 @@ fn main() -> anyhow::Result<()> {
 
     let z = x.matmul(&y)?;
 
-    println!("{}", z.render_dag());
-    println!("{}", z.render_fused_dag());
-    println!("{}", z.render_kernels()?);
+    println!("{}\n", z.render_dag());
+    println!("{}\n", z.render_fused_dag());
+    println!("{}\n", z.render_kernels()?);
 
     Ok(())
 }
