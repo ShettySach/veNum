@@ -6,14 +6,31 @@ use cranelift_codegen::ir::Function;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{Linkage, Module};
 
-use super::super::dtype::DType;
-use super::super::graph::{Graph, NodeId};
-use super::super::schedule::{FusedKernel, ReduceKind};
-use super::compiled::CompiledKernel;
-use super::expr::build_expression;
-use super::math::{declare_math_funcs, declare_math_refs, register_math_symbols};
-use super::tracker::{compute_tracker_byte_offset, decompose_flat_index, flatten_multi_index};
+use crate::core::lazy::dtype::DType;
+use crate::core::lazy::graph::{Graph, NodeId};
+use crate::core::lazy::jit::compiled::CompiledKernel;
+use crate::core::lazy::jit::expr::build_expression;
+use crate::core::lazy::jit::math::{
+    declare_math_funcs, declare_math_refs, register_math_symbols, MathFuncRefs,
+};
+use crate::core::lazy::jit::tracker::{
+    compute_tracker_byte_offset, decompose_flat_index, flatten_multi_index,
+};
+use crate::core::lazy::schedule::{FusedKernel, ReduceKind};
 
+struct KernelBuilderContext<'a> {
+    graph: &'a Graph,
+    kernel: &'a FusedKernel,
+    input_ptrs: &'a [Value],
+    input_index: &'a HashMap<NodeId, usize>,
+    out_ptr: Value,
+    n_param: Value,
+    math_refs: &'a MathFuncRefs,
+    has_trackers: bool,
+    dtype: DType,
+    cl_type: types::Type,
+    elem_size: i64,
+}
 /// Map a DType to the corresponding Cranelift IR type.
 fn dtype_to_cl_type(dtype: DType) -> types::Type {
     match dtype {
@@ -102,36 +119,24 @@ pub fn compile_kernel(
         input_ptrs.push(p);
     }
 
+    let kernel_ctx = KernelBuilderContext {
+        graph,
+        kernel,
+        input_ptrs: &input_ptrs,
+        input_index,
+        out_ptr,
+        n_param,
+        math_refs: &math_refs,
+        has_trackers,
+        dtype,
+        cl_type,
+        elem_size,
+    };
+
     if kernel.reduce.is_some() {
-        emit_reduce_kernel(
-            graph,
-            kernel,
-            &mut builder,
-            &input_ptrs,
-            &input_index,
-            out_ptr,
-            n_param,
-            &math_refs,
-            has_trackers,
-            dtype,
-            cl_type,
-            elem_size,
-        )?;
+        emit_reduce_kernel(&kernel_ctx, &mut builder)?;
     } else {
-        emit_elementwise_kernel(
-            graph,
-            kernel,
-            &mut builder,
-            &input_ptrs,
-            &input_index,
-            out_ptr,
-            n_param,
-            &math_refs,
-            has_trackers,
-            dtype,
-            cl_type,
-            elem_size,
-        )?;
+        emit_elementwise_kernel(&kernel_ctx, &mut builder)?;
     }
 
     builder.finalize();
@@ -159,21 +164,13 @@ pub fn compile_kernel(
 }
 
 /// Emit the body of a pure elementwise kernel (existing logic).
-#[allow(clippy::too_many_arguments)]
 fn emit_elementwise_kernel(
-    graph: &Graph,
-    kernel: &FusedKernel,
+    kernel_ctx: &KernelBuilderContext<'_>,
     builder: &mut FunctionBuilder,
-    input_ptrs: &[Value],
-    input_index: &HashMap<NodeId, usize>,
-    out_ptr: Value,
-    n_param: Value,
-    math_refs: &super::math::MathFuncRefs,
-    has_trackers: bool,
-    dtype: DType,
-    cl_type: types::Type,
-    elem_size: i64,
 ) -> Result<()> {
+    let graph = kernel_ctx.graph;
+    let kernel = kernel_ctx.kernel;
+
     // Loop: for i in 0..n
     let loop_header = builder.create_block();
     builder.append_block_param(loop_header, types::I64);
@@ -187,7 +184,9 @@ fn emit_elementwise_kernel(
     // Loop header: check i < n
     builder.switch_to_block(loop_header);
     let i = builder.block_params(loop_header)[0];
-    let cmp = builder.ins().icmp(IntCC::UnsignedLessThan, i, n_param);
+    let cmp = builder
+        .ins()
+        .icmp(IntCC::UnsignedLessThan, i, kernel_ctx.n_param);
     builder.ins().brif(cmp, loop_body, &[], loop_exit, &[]);
 
     // Loop body
@@ -195,7 +194,7 @@ fn emit_elementwise_kernel(
     builder.seal_block(loop_body);
 
     // Byte offset for output = i * elem_size.
-    let elem_size_val = builder.ins().iconst(types::I64, elem_size);
+    let elem_size_val = builder.ins().iconst(types::I64, kernel_ctx.elem_size);
     let byte_offset = builder.ins().imul(i, elem_size_val);
 
     // Check if any tracker is non-contiguous and actually needs index
@@ -206,7 +205,7 @@ fn emit_elementwise_kernel(
         .map(|t| !t.is_contiguous())
         .unwrap_or(false);
     let needs_decompose =
-        (has_trackers && kernel.has_noncontiguous_trackers) || output_tracker_noncontig;
+        (kernel_ctx.has_trackers && kernel.has_noncontiguous_trackers) || output_tracker_noncontig;
 
     // If we have non-contiguous trackers, decompose flat index `i` into
     // multi-dim indices. Contiguous trackers reuse the flat byte offset.
@@ -223,7 +222,8 @@ fn emit_elementwise_kernel(
             // Contiguous tracker: flat offset is equivalent, no decomposition needed.
             tracked_byte_offsets.insert(node_id, byte_offset);
         } else if let Some(ref dims) = dim_indices {
-            let tracked_offset = compute_tracker_byte_offset(builder, dims, tracker, elem_size);
+            let tracked_offset =
+                compute_tracker_byte_offset(builder, dims, tracker, kernel_ctx.elem_size);
             tracked_byte_offsets.insert(node_id, tracked_offset);
         }
     }
@@ -232,14 +232,14 @@ fn emit_elementwise_kernel(
         graph,
         kernel.expr_root,
         builder,
-        input_ptrs,
-        input_index,
+        kernel_ctx.input_ptrs,
+        kernel_ctx.input_index,
         byte_offset,
-        math_refs,
+        kernel_ctx.math_refs,
         &tracked_byte_offsets,
         &kernel.shape_source_map,
-        dtype,
-        cl_type,
+        kernel_ctx.dtype,
+        kernel_ctx.cl_type,
     )?;
 
     // Store result to out[...], applying any forward-fused output tracker.
@@ -247,16 +247,16 @@ fn emit_elementwise_kernel(
         if tracker.is_contiguous() {
             byte_offset
         } else if let Some(ref dims) = dim_indices {
-            compute_tracker_byte_offset(builder, dims, tracker, elem_size)
+            compute_tracker_byte_offset(builder, dims, tracker, kernel_ctx.elem_size)
         } else {
             let dims = decompose_flat_index(builder, i, &kernel.output_shape);
-            compute_tracker_byte_offset(builder, &dims, tracker, elem_size)
+            compute_tracker_byte_offset(builder, &dims, tracker, kernel_ctx.elem_size)
         }
     } else {
         byte_offset
     };
 
-    let out_addr = builder.ins().iadd(out_ptr, out_byte_offset);
+    let out_addr = builder.ins().iadd(kernel_ctx.out_ptr, out_byte_offset);
     builder.ins().store(MemFlags::new(), result, out_addr, 0);
 
     // i += 1, jump back to header
@@ -285,21 +285,13 @@ fn emit_elementwise_kernel(
 ///       val = eval(expr_root at iter_idx)
 ///       acc = combine(acc, val)
 ///     out[out_i] = acc
-#[allow(clippy::too_many_arguments)]
 fn emit_reduce_kernel(
-    graph: &Graph,
-    kernel: &FusedKernel,
+    kernel_ctx: &KernelBuilderContext<'_>,
     builder: &mut FunctionBuilder,
-    input_ptrs: &[Value],
-    input_index: &HashMap<NodeId, usize>,
-    out_ptr: Value,
-    n_param: Value,
-    math_refs: &super::math::MathFuncRefs,
-    _has_trackers: bool,
-    dtype: DType,
-    cl_type: types::Type,
-    elem_size: i64,
 ) -> Result<()> {
+    let graph = kernel_ctx.graph;
+    let kernel = kernel_ctx.kernel;
+
     let reduce_spec = kernel.reduce.as_ref().unwrap();
 
     // Compute reduce extents: the sizes of the reduced dimensions.
@@ -315,12 +307,17 @@ fn emit_reduce_kernel(
     let reduce_numel: usize = reduce_extents.iter().product();
     let reduce_numel_val = builder.ins().iconst(types::I64, reduce_numel as i64);
 
-    let identity = emit_reduce_identity(builder, &reduce_spec.op, dtype, cl_type);
+    let identity = emit_reduce_identity(
+        builder,
+        &reduce_spec.op,
+        kernel_ctx.dtype,
+        kernel_ctx.cl_type,
+    );
 
     // Define constants in the entry block so they dominate all subsequent blocks.
     let zero = builder.ins().iconst(types::I64, 0);
     let one = builder.ins().iconst(types::I64, 1);
-    let elem_size_val = builder.ins().iconst(types::I64, elem_size);
+    let elem_size_val = builder.ins().iconst(types::I64, kernel_ctx.elem_size);
 
     // --- Outer loop: for out_i in 0..output_numel ---
     let out_header = builder.create_block();
@@ -332,7 +329,9 @@ fn emit_reduce_kernel(
 
     builder.switch_to_block(out_header);
     let out_i = builder.block_params(out_header)[0];
-    let out_cmp = builder.ins().icmp(IntCC::UnsignedLessThan, out_i, n_param);
+    let out_cmp = builder
+        .ins()
+        .icmp(IntCC::UnsignedLessThan, out_i, kernel_ctx.n_param);
     builder.ins().brif(out_cmp, out_body, &[], out_exit, &[]);
 
     builder.switch_to_block(out_body);
@@ -344,10 +343,10 @@ fn emit_reduce_kernel(
     // --- Inner loop: for red_i in 0..reduce_numel ---
     let red_header = builder.create_block();
     builder.append_block_param(red_header, types::I64); // red_i
-    builder.append_block_param(red_header, cl_type); // acc
+    builder.append_block_param(red_header, kernel_ctx.cl_type); // acc
     let red_body = builder.create_block();
     let red_exit = builder.create_block();
-    builder.append_block_param(red_exit, cl_type); // acc_final
+    builder.append_block_param(red_exit, kernel_ctx.cl_type); // acc_final
 
     builder.ins().jump(red_header, &[zero, identity]);
 
@@ -383,7 +382,8 @@ fn emit_reduce_kernel(
     // Compute per-input tracked byte offsets from iter_idx.
     let mut tracked_byte_offsets: HashMap<NodeId, Value> = HashMap::new();
     for (&node_id, tracker) in &kernel.input_trackers {
-        let tracked_offset = compute_tracker_byte_offset(builder, &iter_idx, tracker, elem_size);
+        let tracked_offset =
+            compute_tracker_byte_offset(builder, &iter_idx, tracker, kernel_ctx.elem_size);
         tracked_byte_offsets.insert(node_id, tracked_offset);
     }
 
@@ -392,18 +392,18 @@ fn emit_reduce_kernel(
         graph,
         kernel.expr_root,
         builder,
-        input_ptrs,
-        input_index,
+        kernel_ctx.input_ptrs,
+        kernel_ctx.input_index,
         iter_byte_offset,
-        math_refs,
+        kernel_ctx.math_refs,
         &tracked_byte_offsets,
         &kernel.shape_source_map,
-        dtype,
-        cl_type,
+        kernel_ctx.dtype,
+        kernel_ctx.cl_type,
     )?;
 
     // Combine accumulator with new value.
-    let acc_next = emit_reduce_combine(builder, &reduce_spec.op, dtype, acc, val);
+    let acc_next = emit_reduce_combine(builder, &reduce_spec.op, kernel_ctx.dtype, acc, val);
 
     // red_i += 1, jump back to red_header
     let red_i_next = builder.ins().iadd(red_i, one);
@@ -420,12 +420,12 @@ fn emit_reduce_kernel(
         if tracker.is_contiguous() {
             builder.ins().imul(out_i, elem_size_val)
         } else {
-            compute_tracker_byte_offset(builder, &out_idx, tracker, elem_size)
+            compute_tracker_byte_offset(builder, &out_idx, tracker, kernel_ctx.elem_size)
         }
     } else {
         builder.ins().imul(out_i, elem_size_val)
     };
-    let out_addr = builder.ins().iadd(out_ptr, out_byte_offset);
+    let out_addr = builder.ins().iadd(kernel_ctx.out_ptr, out_byte_offset);
     builder.ins().store(MemFlags::new(), acc_final, out_addr, 0);
 
     // out_i += 1

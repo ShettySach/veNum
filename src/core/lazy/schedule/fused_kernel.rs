@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use super::super::graph::{Graph, NodeId, Op};
-use super::super::shape_tracker::ShapeTracker;
+use crate::core::lazy::graph::{Graph, NodeId, Op};
+use crate::core::lazy::shape_tracker::ShapeTracker;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ReduceKind {

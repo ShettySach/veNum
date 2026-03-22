@@ -1,5 +1,5 @@
-use super::super::dtype::DType;
-use super::Tensor;
+use crate::core::lazy::dtype::DType;
+use crate::core::lazy::tensor::Tensor;
 
 impl Tensor {
     pub fn shape(&self) -> &[usize] {

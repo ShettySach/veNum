@@ -1,6 +1,6 @@
-use super::super::dtype::{Buffer, DType};
+use crate::core::lazy::dtype::{Buffer, DType};
 
-use super::{NodeId, Op};
+use crate::core::lazy::graph::{NodeId, Op};
 
 #[derive(Clone, Debug)]
 pub struct Node {

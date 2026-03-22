@@ -1,5 +1,5 @@
-use super::super::dtype::Buffer;
-use super::super::graph::{Graph, NodeId, Op};
+use crate::core::lazy::dtype::Buffer;
+use crate::core::lazy::graph::{Graph, NodeId, Op};
 
 pub(super) fn op_label(op: &Op) -> &'static str {
     match op {

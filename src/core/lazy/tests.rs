@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod lazy_tests {
-    use super::super::dtype::Buffer;
-    use super::super::graph::{Graph, Op};
-    use super::super::schedule::{build_schedule, ScheduleItem};
+    use crate::core::lazy::dtype::Buffer;
+    use crate::core::lazy::graph::{Graph, Op};
+    use crate::core::lazy::schedule::{build_schedule, ScheduleItem};
     use crate::{Context, Tensor};
     use anyhow::Result;
 

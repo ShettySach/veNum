@@ -1,9 +1,9 @@
 use anyhow::{bail, Result};
 use std::cmp::Ordering;
 
-use super::super::dtype::{Buffer, Scalar};
-use super::super::graph::Op;
 use crate::core::iters::Indexer;
+use crate::core::lazy::dtype::{Buffer, Scalar};
+use crate::core::lazy::graph::Op;
 
 pub(crate) fn execute_reduce_op_typed(
     op: &Op,

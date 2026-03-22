@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 
-use super::helpers::broadcast_batch;
-use super::Tensor;
+use crate::core::lazy::tensor::helpers::broadcast_batch;
+use crate::core::lazy::tensor::Tensor;
 
 impl Tensor {
     pub fn matmul(&self, rhs: &Tensor) -> Result<Tensor> {

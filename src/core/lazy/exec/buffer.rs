@@ -1,8 +1,8 @@
 use anyhow::{bail, Result};
 use std::borrow::Cow;
 
-use super::super::dtype::{Buffer, DType, Scalar};
-use super::super::graph::{Graph, NodeId};
+use crate::core::lazy::dtype::{Buffer, DType, Scalar};
+use crate::core::lazy::graph::{Graph, NodeId};
 
 #[allow(dead_code)]
 pub(crate) fn get_realized_buffer<'a>(

@@ -1,6 +1,3 @@
-use super::context::Context;
-use super::dtype::{Buffer, DType, Scalar};
-
 mod accessors;
 mod constructors;
 mod helpers;

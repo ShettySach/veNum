@@ -1,13 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
-use super::super::graph::{Graph, NodeId, Op};
-use super::super::shape_tracker::ShapeTracker;
+use crate::core::lazy::graph::{Graph, NodeId, Op};
+use crate::core::lazy::shape_tracker::ShapeTracker;
 
-use super::fused_kernel::{
+use crate::core::lazy::schedule::fused_kernel::{
     collect_kernel_inputs, try_build_tracker, FusedKernel, ReduceKind, ReduceOpItem, ReduceSpec,
     ShapeOpItem,
 };
-use super::schedule_item::ScheduleItem;
+use crate::core::lazy::schedule::schedule_item::ScheduleItem;
 
 fn build_input_index_map(input_buffers: &[NodeId]) -> HashMap<NodeId, usize> {
     input_buffers
@@ -113,8 +113,7 @@ fn analyze_schedule(graph: &Graph, root: NodeId) -> ScheduleAnalysis {
     let consumer_counts = compute_consumer_counts(graph, &topo);
 
     let mut inlined: HashSet<NodeId> = HashSet::new();
-    let mut planned: Vec<Option<ScheduleItem>> =
-        (0..graph.nodes.len()).map(|_| None).collect();
+    let mut planned: Vec<Option<ScheduleItem>> = (0..graph.nodes.len()).map(|_| None).collect();
 
     for &id in &topo {
         if inlined.contains(&id) {
@@ -226,9 +225,14 @@ fn analyze_reduce_node(
     let expr_input = node.inputs[0];
 
     if let Some(reduce_spec) = reduce_spec_from_op(&node.op) {
-        if let Some(plan) =
-            try_fused_reduce(graph, id, expr_input, reduce_spec, consumer_counts, topo_set)
-        {
+        if let Some(plan) = try_fused_reduce(
+            graph,
+            id,
+            expr_input,
+            reduce_spec,
+            consumer_counts,
+            topo_set,
+        ) {
             return plan;
         }
     }

@@ -1,4 +1,4 @@
-use super::super::dtype::Scalar;
+use crate::core::lazy::dtype::Scalar;
 
 #[derive(Clone, Debug)]
 #[allow(dead_code)]

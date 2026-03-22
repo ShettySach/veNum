@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use anyhow::Result;
 use cranelift::prelude::{types, FunctionBuilder, InstBuilder, MemFlags, Value};
 
-use super::super::dtype::{DType, Scalar};
-use super::super::graph::{Graph, NodeId, Op};
-use super::math::{math_func_ref_for_op, MathFuncRefs};
+use crate::core::lazy::dtype::{DType, Scalar};
+use crate::core::lazy::graph::{Graph, NodeId, Op};
+use crate::core::lazy::jit::math::{math_func_ref_for_op, MathFuncRefs};
 
 /// Recursively build the Cranelift IR for the expression tree rooted at `id`.
 pub(super) fn build_expression(
@@ -29,7 +29,10 @@ pub(super) fn build_expression(
             if let Some(&idx) = input_index.get(&resolved_id) {
                 // Source is a buffer input — load via tracked or flat offset.
                 let ptr = input_ptrs[idx];
-                let offset = tracked_byte_offsets.get(&resolved_id).copied().unwrap_or(byte_offset);
+                let offset = tracked_byte_offsets
+                    .get(&resolved_id)
+                    .copied()
+                    .unwrap_or(byte_offset);
                 let addr = builder.ins().iadd(ptr, offset);
                 Ok(builder.ins().load(cl_type, MemFlags::new(), addr, 0))
             } else {
@@ -55,7 +58,10 @@ pub(super) fn build_expression(
                 .get(&id)
                 .ok_or_else(|| anyhow::anyhow!("Load node {:?} not found in input_index", id))?;
             let ptr = input_ptrs[idx];
-            let offset = tracked_byte_offsets.get(&id).copied().unwrap_or(byte_offset);
+            let offset = tracked_byte_offsets
+                .get(&id)
+                .copied()
+                .unwrap_or(byte_offset);
             let addr = builder.ins().iadd(ptr, offset);
             Ok(builder.ins().load(cl_type, MemFlags::new(), addr, 0))
         }

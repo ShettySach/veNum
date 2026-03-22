@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::super::dtype::DType;
+use crate::core::lazy::dtype::DType;
 
 /// Key for pooled buffer lookup: dtype + element count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

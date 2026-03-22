@@ -1,4 +1,4 @@
-use super::fused_kernel::{FusedKernel, ReduceOpItem, ShapeOpItem};
+use crate::core::lazy::schedule::fused_kernel::{FusedKernel, ReduceOpItem, ShapeOpItem};
 
 /// An item in the execution schedule.
 #[derive(Debug)]

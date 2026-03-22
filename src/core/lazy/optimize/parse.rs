@@ -1,8 +1,8 @@
 use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
 
-use super::super::dtype::{DType, Scalar};
-use super::super::graph::{Graph, Node, NodeId, Op};
+use crate::core::lazy::dtype::{DType, Scalar};
+use crate::core::lazy::graph::{Graph, Node, NodeId, Op};
 
 /// Parse an egglog extracted term back into a Graph.
 /// Reuses Load buffers from the original graph.
@@ -47,7 +47,7 @@ fn parse_term_direct(
     // For the root term, we don't have a TermId to check in memo
     // But for all child terms (via TermIds in args), we'll use memoization
     match term {
-        egglog::Term::App(_head, args) => {
+        egglog::Term::App(_head, _args) => {
             // For children, we have TermIds and can memoize
             // Parse using the TermId-based function
             // Since all children are TermIds, we can delegate to parse_term
@@ -55,7 +55,6 @@ fn parse_term_direct(
                 original,
                 termdag,
                 term,
-                args,
                 graph,
                 dtype,
                 shape_table,
@@ -89,7 +88,6 @@ fn parse_term(
         original,
         termdag,
         term,
-        &[],
         graph,
         dtype,
         shape_table,
@@ -106,7 +104,6 @@ fn parse_term_from_app(
     original: &Graph,
     termdag: &egglog::TermDag,
     term: &egglog::Term,
-    _args_hint: &[egglog::TermId], // Not used, but kept for signature compatibility
     graph: &mut Graph,
     dtype: DType,
     shape_table: &[Vec<usize>],

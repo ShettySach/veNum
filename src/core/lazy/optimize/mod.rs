@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 
 use egglog::prelude::*;
 
-use super::graph::{Graph, NodeId};
+use crate::core::lazy::graph::{Graph, NodeId};
 
 /// Run the egglog optimizer on the graph rooted at `root`.
 /// Returns a new, optimized Graph and the new root NodeId.

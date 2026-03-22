@@ -1,10 +1,10 @@
 use anyhow::Result;
 use std::sync::Arc;
 
-use super::graph::Graph;
-use super::jit::compile_kernel;
-use super::kernel::ExecutableKernel;
-use super::schedule::FusedKernel;
+use crate::core::lazy::graph::Graph;
+use crate::core::lazy::jit::compile_kernel;
+use crate::core::lazy::kernel::ExecutableKernel;
+use crate::core::lazy::schedule::FusedKernel;
 
 /// Backend abstraction for compiling and executing fused kernels.
 ///
@@ -18,17 +18,6 @@ pub trait Backend: Send + Sync {
         kernel: &FusedKernel,
         capture_ir: bool,
     ) -> Result<Arc<dyn ExecutableKernel>>;
-
-    /// Execute a compiled kernel.
-    fn execute(
-        &self,
-        kernel: &dyn ExecutableKernel,
-        inputs: &[*const u8],
-        output: *mut u8,
-        numel: usize,
-    ) {
-        kernel.execute(inputs, output, numel)
-    }
 }
 
 /// Default CPU backend using Cranelift.

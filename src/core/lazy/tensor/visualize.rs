@@ -1,8 +1,8 @@
 use anyhow::Result;
 
-use super::super::{optimize, render};
-use super::helpers::{clone_reachable_subgraph, is_optimize_safe};
-use super::Tensor;
+use crate::core::lazy::tensor::helpers::{clone_reachable_subgraph, is_optimize_safe};
+use crate::core::lazy::tensor::Tensor;
+use crate::core::lazy::{optimize, render};
 
 impl Tensor {
     pub fn render_dag(&self) -> String {
@@ -42,7 +42,7 @@ impl Tensor {
     pub fn render_kernels(&self) -> Result<String> {
         use std::fmt::Write;
 
-        use super::super::schedule::{build_schedule, ScheduleItem};
+        use crate::core::lazy::schedule::{build_schedule, ScheduleItem};
 
         let graph_handle = self.cx.graph();
         let graph = graph_handle.lock().unwrap();

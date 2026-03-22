@@ -2,7 +2,9 @@ use anyhow::Result;
 
 use crate::core::errors::*;
 
-use super::{Buffer, Context, DType, Scalar, Tensor};
+use crate::core::lazy::context::Context;
+use crate::core::lazy::dtype::{Buffer, DType, Scalar};
+use crate::core::lazy::tensor::Tensor;
 
 impl Tensor {
     pub fn from_slice(cx: &Context, data: &[f32], shape: Vec<usize>) -> Self {
