@@ -758,4 +758,72 @@ mod lazy_tests {
         assert_eq!(r.sizes(), &[3]);
         Ok(())
     }
+
+    /// Regression test for Load node deduplication bug.
+    /// When egglog extracts optimized terms, Load nodes that appear multiple times
+    /// should be deduplicated to reuse the same NodeId in the reconstructed graph.
+    /// This test creates a diamond pattern where inputs are reused in multiple branches.
+    #[test]
+    fn load_node_deduplication() -> Result<()> {
+        let cx = Context::new();
+
+        // Create input tensors
+        let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![4]);
+        let b = Tensor::from_slice(&cx, &[1.0, 1.0, 1.0, 1.0], vec![4]);
+        let c = Tensor::from_slice(&cx, &[2.0, 2.0, 2.0, 2.0], vec![4]);
+        let d = Tensor::from_slice(&cx, &[0.5, 0.5, 0.5, 0.5], vec![4]);
+
+        // Branch 1: (a * b) + a -> uses 'a' twice
+        let w1 = (&a * &b)?;
+        let w2 = (&w1 + &a)?;
+        let w3 = w2.reshape(vec![2, 2])?;
+
+        // Branch 2: (c * d) + c -> uses 'c' twice
+        let x1 = (&c * &d)?;
+        let x2 = (&x1 + &c)?;
+        let x3 = x2.reshape(vec![2, 2])?;
+
+        // Final combination
+        let y = (&w3 + &x3)?;
+
+        // Get DAG renderings to check node count
+        let raw_dag = y.render_dag();
+        let opt_dag = y.render_optimized_dag()?;
+
+        println!("=== RAW DAG ===\n{}", raw_dag);
+        println!("=== OPTIMIZED DAG ===\n{}", opt_dag);
+
+        // Count Load nodes in the raw DAG - should be 4
+        // Lines look like: N0["Load F32\n[...]"]
+        let raw_load_count = raw_dag
+            .lines()
+            .filter(|line| line.contains("\"Load"))
+            .count();
+        assert_eq!(raw_load_count, 4, "Raw DAG should have 4 Load nodes");
+
+        // Count Load nodes in the optimized DAG
+        // The bug would cause 6 Load nodes (duplicates of 'a' and 'c')
+        let opt_load_count = opt_dag
+            .lines()
+            .filter(|line| line.contains("\"Load"))
+            .count();
+
+        // With the fix, should still have exactly 4 Load nodes (a, b, c, d)
+        assert_eq!(
+            opt_load_count, 4,
+            "Expected 4 Load nodes in optimized graph, found {}.\nOptimized DAG:\n{}",
+            opt_load_count, opt_dag
+        );
+
+        // Verify correctness by executing
+        let result = y.realize()?;
+        assert_eq!(result.sizes(), &[2, 2]);
+
+        // Expected: w3 = reshape((a*b)+a) = reshape([2,4,6,8]) = [[2,4],[6,8]]
+        //           x3 = reshape((c*d)+c) = reshape([3,3,3,3]) = [[3,3],[3,3]]
+        //           y = w3 + x3 = [[5,7],[9,11]]
+        assert_eq!(*result.data(), [5.0, 7.0, 9.0, 11.0]);
+
+        Ok(())
+    }
 }
