@@ -9,7 +9,7 @@ use cranelift_module::{Linkage, Module};
 use crate::core::lazy::dtype::DType;
 use crate::core::lazy::graph::{Graph, NodeId};
 use crate::core::lazy::jit::compiled::CompiledKernel;
-use crate::core::lazy::jit::expr::build_expression;
+use crate::core::lazy::jit::expr::{build_expression, ExprBuildContext};
 use crate::core::lazy::jit::math::{
     declare_math_funcs, declare_math_refs, register_math_symbols, MathFuncRefs,
 };
@@ -170,7 +170,6 @@ fn emit_elementwise_kernel(
 ) -> Result<()> {
     let graph = kernel_ctx.graph;
     let kernel = kernel_ctx.kernel;
-
     // Loop: for i in 0..n
     let loop_header = builder.create_block();
     builder.append_block_param(loop_header, types::I64);
@@ -228,19 +227,18 @@ fn emit_elementwise_kernel(
         }
     }
 
-    let result = build_expression(
+    let expr_ctx = ExprBuildContext {
         graph,
-        kernel.expr_root,
-        builder,
-        kernel_ctx.input_ptrs,
-        kernel_ctx.input_index,
-        byte_offset,
-        kernel_ctx.math_refs,
-        &tracked_byte_offsets,
-        &kernel.shape_source_map,
-        kernel_ctx.dtype,
-        kernel_ctx.cl_type,
-    )?;
+        input_ptrs: kernel_ctx.input_ptrs,
+        input_index: kernel_ctx.input_index,
+        math: kernel_ctx.math_refs,
+        tracked_byte_offsets: &tracked_byte_offsets,
+        shape_source_map: &kernel.shape_source_map,
+        dtype: kernel_ctx.dtype,
+        cl_type: kernel_ctx.cl_type,
+    };
+
+    let result = build_expression(&expr_ctx, kernel.expr_root, builder, byte_offset)?;
 
     // Store result to out[...], applying any forward-fused output tracker.
     let out_byte_offset = if let Some(tracker) = kernel.output_tracker.as_ref() {
@@ -388,19 +386,17 @@ fn emit_reduce_kernel(
     }
 
     // Evaluate the expression tree at the current iteration index.
-    let val = build_expression(
+    let expr_ctx = ExprBuildContext {
         graph,
-        kernel.expr_root,
-        builder,
-        kernel_ctx.input_ptrs,
-        kernel_ctx.input_index,
-        iter_byte_offset,
-        kernel_ctx.math_refs,
-        &tracked_byte_offsets,
-        &kernel.shape_source_map,
-        kernel_ctx.dtype,
-        kernel_ctx.cl_type,
-    )?;
+        input_ptrs: kernel_ctx.input_ptrs,
+        input_index: kernel_ctx.input_index,
+        math: kernel_ctx.math_refs,
+        tracked_byte_offsets: &tracked_byte_offsets,
+        shape_source_map: &kernel.shape_source_map,
+        dtype: kernel_ctx.dtype,
+        cl_type: kernel_ctx.cl_type,
+    };
+    let val = build_expression(&expr_ctx, kernel.expr_root, builder, iter_byte_offset)?;
 
     // Combine accumulator with new value.
     let acc_next = emit_reduce_combine(builder, &reduce_spec.op, kernel_ctx.dtype, acc, val);

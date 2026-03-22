@@ -352,6 +352,16 @@ These optimizations are valuable but lower priority or require significant infra
 
 ---
 
+### 4.6 JIT Expression Builder API Cleanup
+
+**Possible Optimization**: In `jit/expr.rs`, consider folding the per-call `byte_offset`
+into a small expression-call context wrapper so recursive expression building can carry
+fewer explicit parameters at call sites.
+
+**Status**: Documented for future cleanup; do not implement yet.
+
+---
+
 ## Implementation Timeline
 
 ### Sprint 1: Quick Wins (1 week)

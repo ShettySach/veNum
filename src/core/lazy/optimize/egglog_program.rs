@@ -363,15 +363,17 @@ pub(super) fn graph_to_actions(graph: &Graph, root: NodeId) -> ProgramData {
     let mut perm_ids: HashMap<Vec<usize>, i64> = HashMap::new();
     let mut perm_table: Vec<Vec<usize>> = Vec::new();
 
-    let root_expr = node_expr(
-        graph,
-        root,
-        &mut memo,
-        &mut shape_ids,
-        &mut shape_table,
-        &mut perm_ids,
-        &mut perm_table,
-    );
+    let root_expr = {
+        let mut builder = NodeExprBuilder {
+            graph,
+            memo: &mut memo,
+            shape_ids: &mut shape_ids,
+            shape_table: &mut shape_table,
+            perm_ids: &mut perm_ids,
+            perm_table: &mut perm_table,
+        };
+        builder.build(root)
+    };
     let actions = vec![egglog::ast::Command::Action(egglog::ast::Action::Let(
         span!(),
         "root".to_owned(),
@@ -401,271 +403,95 @@ fn intern_id(
     }
 }
 
-fn node_expr(
-    graph: &Graph,
-    id: NodeId,
-    memo: &mut [Option<Expr>],
-    shape_ids: &mut HashMap<Vec<usize>, i64>,
-    shape_table: &mut Vec<Vec<usize>>,
-    perm_ids: &mut HashMap<Vec<usize>, i64>,
-    perm_table: &mut Vec<Vec<usize>>,
-) -> Expr {
-    if let Some(expr) = memo[id.0].clone() {
-        return expr;
+struct NodeExprBuilder<'a> {
+    graph: &'a Graph,
+    memo: &'a mut [Option<Expr>],
+    shape_ids: &'a mut HashMap<Vec<usize>, i64>,
+    shape_table: &'a mut Vec<Vec<usize>>,
+    perm_ids: &'a mut HashMap<Vec<usize>, i64>,
+    perm_table: &'a mut Vec<Vec<usize>>,
+}
+
+impl NodeExprBuilder<'_> {
+    fn build(&mut self, id: NodeId) -> Expr {
+        if let Some(expr) = self.memo[id.0].clone() {
+            return expr;
+        }
+
+        let node = self.graph.node(id);
+        let expr = match &node.op {
+            Op::Load => exprs::call("tLoad", vec![exprs::int(id.0 as i64)]),
+            Op::Const(v) => exprs::call("tConst", vec![exprs::float(v.to_f64())]),
+            Op::Add => self.binary("tAdd", node.inputs[0], node.inputs[1]),
+            Op::Sub => self.binary("tSub", node.inputs[0], node.inputs[1]),
+            Op::Mul => self.binary("tMul", node.inputs[0], node.inputs[1]),
+            Op::Div => self.binary("tDiv", node.inputs[0], node.inputs[1]),
+            Op::Exp => self.unary("tExp", node.inputs[0]),
+            Op::Ln => self.unary("tLn", node.inputs[0]),
+            Op::Sqrt => self.unary("tSqrt", node.inputs[0]),
+            Op::Neg => self.unary("tNeg", node.inputs[0]),
+            Op::Reshape => {
+                let shape_id = self.intern_shape(&node.shape);
+                exprs::call(
+                    "tReshape",
+                    vec![self.build(node.inputs[0]), exprs::int(shape_id)],
+                )
+            }
+            Op::Permute(axes) => {
+                let perm_id = self.intern_perm(axes);
+                exprs::call(
+                    "tPermute",
+                    vec![self.build(node.inputs[0]), exprs::int(perm_id)],
+                )
+            }
+            Op::Transpose(d1, d2) => exprs::call(
+                "tTranspose",
+                vec![
+                    self.build(node.inputs[0]),
+                    exprs::int(*d1 as i64),
+                    exprs::int(*d2 as i64),
+                ],
+            ),
+            Op::Expand => {
+                let shape_id = self.intern_shape(&node.shape);
+                exprs::call(
+                    "tExpand",
+                    vec![self.build(node.inputs[0]), exprs::int(shape_id)],
+                )
+            }
+            Op::Squeeze => self.unary("tSqueeze", node.inputs[0]),
+            Op::Unsqueeze(new_rank) => exprs::call(
+                "tUnsqueeze",
+                vec![self.build(node.inputs[0]), exprs::int(*new_rank as i64)],
+            ),
+
+            // Ops not modeled in egglog remain opaque leaves.
+            Op::Slice(_)
+            | Op::Flip(_)
+            | Op::Pad(_, _)
+            | Op::Sum(_, _)
+            | Op::Prod(_, _)
+            | Op::Max(_, _)
+            | Op::Min(_, _) => exprs::call("tLoad", vec![exprs::int(id.0 as i64)]),
+        };
+
+        self.memo[id.0] = Some(expr.clone());
+        expr
     }
 
-    let node = graph.node(id);
-    let expr = match &node.op {
-        Op::Load => exprs::call("tLoad", vec![exprs::int(id.0 as i64)]),
-        Op::Const(v) => exprs::call("tConst", vec![exprs::float(v.to_f64())]),
-        Op::Add => exprs::call(
-            "tAdd",
-            vec![
-                node_expr(
-                    graph,
-                    node.inputs[0],
-                    memo,
-                    shape_ids,
-                    shape_table,
-                    perm_ids,
-                    perm_table,
-                ),
-                node_expr(
-                    graph,
-                    node.inputs[1],
-                    memo,
-                    shape_ids,
-                    shape_table,
-                    perm_ids,
-                    perm_table,
-                ),
-            ],
-        ),
-        Op::Sub => exprs::call(
-            "tSub",
-            vec![
-                node_expr(
-                    graph,
-                    node.inputs[0],
-                    memo,
-                    shape_ids,
-                    shape_table,
-                    perm_ids,
-                    perm_table,
-                ),
-                node_expr(
-                    graph,
-                    node.inputs[1],
-                    memo,
-                    shape_ids,
-                    shape_table,
-                    perm_ids,
-                    perm_table,
-                ),
-            ],
-        ),
-        Op::Mul => exprs::call(
-            "tMul",
-            vec![
-                node_expr(
-                    graph,
-                    node.inputs[0],
-                    memo,
-                    shape_ids,
-                    shape_table,
-                    perm_ids,
-                    perm_table,
-                ),
-                node_expr(
-                    graph,
-                    node.inputs[1],
-                    memo,
-                    shape_ids,
-                    shape_table,
-                    perm_ids,
-                    perm_table,
-                ),
-            ],
-        ),
-        Op::Div => exprs::call(
-            "tDiv",
-            vec![
-                node_expr(
-                    graph,
-                    node.inputs[0],
-                    memo,
-                    shape_ids,
-                    shape_table,
-                    perm_ids,
-                    perm_table,
-                ),
-                node_expr(
-                    graph,
-                    node.inputs[1],
-                    memo,
-                    shape_ids,
-                    shape_table,
-                    perm_ids,
-                    perm_table,
-                ),
-            ],
-        ),
-        Op::Exp => exprs::call(
-            "tExp",
-            vec![node_expr(
-                graph,
-                node.inputs[0],
-                memo,
-                shape_ids,
-                shape_table,
-                perm_ids,
-                perm_table,
-            )],
-        ),
-        Op::Ln => exprs::call(
-            "tLn",
-            vec![node_expr(
-                graph,
-                node.inputs[0],
-                memo,
-                shape_ids,
-                shape_table,
-                perm_ids,
-                perm_table,
-            )],
-        ),
-        Op::Sqrt => exprs::call(
-            "tSqrt",
-            vec![node_expr(
-                graph,
-                node.inputs[0],
-                memo,
-                shape_ids,
-                shape_table,
-                perm_ids,
-                perm_table,
-            )],
-        ),
-        Op::Neg => exprs::call(
-            "tNeg",
-            vec![node_expr(
-                graph,
-                node.inputs[0],
-                memo,
-                shape_ids,
-                shape_table,
-                perm_ids,
-                perm_table,
-            )],
-        ),
-        Op::Reshape => {
-            let shape_id = intern_id(shape_ids, shape_table, &node.shape);
-            exprs::call(
-                "tReshape",
-                vec![
-                    node_expr(
-                        graph,
-                        node.inputs[0],
-                        memo,
-                        shape_ids,
-                        shape_table,
-                        perm_ids,
-                        perm_table,
-                    ),
-                    exprs::int(shape_id),
-                ],
-            )
-        }
-        Op::Permute(axes) => {
-            let perm_id = intern_id(perm_ids, perm_table, axes);
-            exprs::call(
-                "tPermute",
-                vec![
-                    node_expr(
-                        graph,
-                        node.inputs[0],
-                        memo,
-                        shape_ids,
-                        shape_table,
-                        perm_ids,
-                        perm_table,
-                    ),
-                    exprs::int(perm_id),
-                ],
-            )
-        }
-        Op::Transpose(d1, d2) => exprs::call(
-            "tTranspose",
-            vec![
-                node_expr(
-                    graph,
-                    node.inputs[0],
-                    memo,
-                    shape_ids,
-                    shape_table,
-                    perm_ids,
-                    perm_table,
-                ),
-                exprs::int(*d1 as i64),
-                exprs::int(*d2 as i64),
-            ],
-        ),
-        Op::Expand => {
-            let shape_id = intern_id(shape_ids, shape_table, &node.shape);
-            exprs::call(
-                "tExpand",
-                vec![
-                    node_expr(
-                        graph,
-                        node.inputs[0],
-                        memo,
-                        shape_ids,
-                        shape_table,
-                        perm_ids,
-                        perm_table,
-                    ),
-                    exprs::int(shape_id),
-                ],
-            )
-        }
-        Op::Squeeze => exprs::call(
-            "tSqueeze",
-            vec![node_expr(
-                graph,
-                node.inputs[0],
-                memo,
-                shape_ids,
-                shape_table,
-                perm_ids,
-                perm_table,
-            )],
-        ),
-        Op::Unsqueeze(new_rank) => exprs::call(
-            "tUnsqueeze",
-            vec![
-                node_expr(
-                    graph,
-                    node.inputs[0],
-                    memo,
-                    shape_ids,
-                    shape_table,
-                    perm_ids,
-                    perm_table,
-                ),
-                exprs::int(*new_rank as i64),
-            ],
-        ),
+    fn unary(&mut self, ctor: &str, input: NodeId) -> Expr {
+        exprs::call(ctor, vec![self.build(input)])
+    }
 
-        // Ops not modeled in egglog remain opaque leaves.
-        Op::Slice(_)
-        | Op::Flip(_)
-        | Op::Pad(_, _)
-        | Op::Sum(_, _)
-        | Op::Prod(_, _)
-        | Op::Max(_, _)
-        | Op::Min(_, _) => exprs::call("tLoad", vec![exprs::int(id.0 as i64)]),
-    };
+    fn binary(&mut self, ctor: &str, lhs: NodeId, rhs: NodeId) -> Expr {
+        exprs::call(ctor, vec![self.build(lhs), self.build(rhs)])
+    }
 
-    memo[id.0] = Some(expr.clone());
-    expr
+    fn intern_shape(&mut self, shape: &[usize]) -> i64 {
+        intern_id(self.shape_ids, self.shape_table, shape)
+    }
+
+    fn intern_perm(&mut self, perm: &[usize]) -> i64 {
+        intern_id(self.perm_ids, self.perm_table, perm)
+    }
 }

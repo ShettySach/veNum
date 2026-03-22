@@ -7,93 +7,68 @@ use crate::core::lazy::dtype::{DType, Scalar};
 use crate::core::lazy::graph::{Graph, NodeId, Op};
 use crate::core::lazy::jit::math::{math_func_ref_for_op, MathFuncRefs};
 
+pub(super) struct ExprBuildContext<'a> {
+    pub graph: &'a Graph,
+    pub input_ptrs: &'a [Value],
+    pub input_index: &'a HashMap<NodeId, usize>,
+    pub math: &'a MathFuncRefs,
+    pub tracked_byte_offsets: &'a HashMap<NodeId, Value>,
+    pub shape_source_map: &'a HashMap<NodeId, NodeId>,
+    pub dtype: DType,
+    pub cl_type: types::Type,
+}
+
 /// Recursively build the Cranelift IR for the expression tree rooted at `id`.
 pub(super) fn build_expression(
-    graph: &Graph,
+    expr_ctx: &ExprBuildContext<'_>,
     id: NodeId,
     builder: &mut FunctionBuilder,
-    input_ptrs: &[Value],
-    input_index: &HashMap<NodeId, usize>,
     byte_offset: Value,
-    math: &MathFuncRefs,
-    tracked_byte_offsets: &HashMap<NodeId, Value>,
-    shape_source_map: &HashMap<NodeId, NodeId>,
-    dtype: DType,
-    cl_type: types::Type,
 ) -> Result<Value> {
-    let node = graph.node(id);
+    let node = expr_ctx.graph.node(id);
 
     match &node.op {
         op if !op.is_elementwise() && !matches!(op, Op::Const(_)) => {
-            let resolved_id = shape_source_map.get(&id).copied().unwrap_or(id);
-            if let Some(&idx) = input_index.get(&resolved_id) {
+            let resolved_id = expr_ctx.shape_source_map.get(&id).copied().unwrap_or(id);
+            if let Some(&idx) = expr_ctx.input_index.get(&resolved_id) {
                 // Source is a buffer input — load via tracked or flat offset.
-                let ptr = input_ptrs[idx];
-                let offset = tracked_byte_offsets
+                let ptr = expr_ctx.input_ptrs[idx];
+                let offset = expr_ctx
+                    .tracked_byte_offsets
                     .get(&resolved_id)
                     .copied()
                     .unwrap_or(byte_offset);
                 let addr = builder.ins().iadd(ptr, offset);
-                Ok(builder.ins().load(cl_type, MemFlags::new(), addr, 0))
+                Ok(builder
+                    .ins()
+                    .load(expr_ctx.cl_type, MemFlags::new(), addr, 0))
             } else {
                 // Source was inlined through a contiguous shape op chain —
                 // recursively evaluate its expression tree.
-                build_expression(
-                    graph,
-                    resolved_id,
-                    builder,
-                    input_ptrs,
-                    input_index,
-                    byte_offset,
-                    math,
-                    tracked_byte_offsets,
-                    shape_source_map,
-                    dtype,
-                    cl_type,
-                )
+                build_expression(expr_ctx, resolved_id, builder, byte_offset)
             }
         }
         Op::Load => {
-            let &idx = input_index
+            let &idx = expr_ctx
+                .input_index
                 .get(&id)
                 .ok_or_else(|| anyhow::anyhow!("Load node {:?} not found in input_index", id))?;
-            let ptr = input_ptrs[idx];
-            let offset = tracked_byte_offsets
+            let ptr = expr_ctx.input_ptrs[idx];
+            let offset = expr_ctx
+                .tracked_byte_offsets
                 .get(&id)
                 .copied()
                 .unwrap_or(byte_offset);
             let addr = builder.ins().iadd(ptr, offset);
-            Ok(builder.ins().load(cl_type, MemFlags::new(), addr, 0))
+            Ok(builder
+                .ins()
+                .load(expr_ctx.cl_type, MemFlags::new(), addr, 0))
         }
-        Op::Const(scalar) => emit_const(builder, *scalar, dtype),
+        Op::Const(scalar) => emit_const(builder, *scalar, expr_ctx.dtype),
         Op::Add | Op::Sub | Op::Mul | Op::Div => {
-            let lhs = build_expression(
-                graph,
-                node.inputs[0],
-                builder,
-                input_ptrs,
-                input_index,
-                byte_offset,
-                math,
-                tracked_byte_offsets,
-                shape_source_map,
-                dtype,
-                cl_type,
-            )?;
-            let rhs = build_expression(
-                graph,
-                node.inputs[1],
-                builder,
-                input_ptrs,
-                input_index,
-                byte_offset,
-                math,
-                tracked_byte_offsets,
-                shape_source_map,
-                dtype,
-                cl_type,
-            )?;
-            Ok(match (node.op.clone(), dtype.is_float()) {
+            let lhs = build_expression(expr_ctx, node.inputs[0], builder, byte_offset)?;
+            let rhs = build_expression(expr_ctx, node.inputs[1], builder, byte_offset)?;
+            Ok(match (node.op.clone(), expr_ctx.dtype.is_float()) {
                 (Op::Add, true) => builder.ins().fadd(lhs, rhs),
                 (Op::Sub, true) => builder.ins().fsub(lhs, rhs),
                 (Op::Mul, true) => builder.ins().fmul(lhs, rhs),
@@ -106,78 +81,33 @@ pub(super) fn build_expression(
             })
         }
         Op::Neg => {
-            let val = build_expression(
-                graph,
-                node.inputs[0],
-                builder,
-                input_ptrs,
-                input_index,
-                byte_offset,
-                math,
-                tracked_byte_offsets,
-                shape_source_map,
-                dtype,
-                cl_type,
-            )?;
-            if dtype.is_float() {
+            let val = build_expression(expr_ctx, node.inputs[0], builder, byte_offset)?;
+            if expr_ctx.dtype.is_float() {
                 Ok(builder.ins().fneg(val))
             } else {
-                let zero = builder.ins().iconst(cl_type, 0);
+                let zero = builder.ins().iconst(expr_ctx.cl_type, 0);
                 Ok(builder.ins().isub(zero, val))
             }
         }
         Op::Exp => {
-            let val = build_expression(
-                graph,
-                node.inputs[0],
-                builder,
-                input_ptrs,
-                input_index,
-                byte_offset,
-                math,
-                tracked_byte_offsets,
-                shape_source_map,
-                dtype,
-                cl_type,
-            )?;
-            let func_ref = math_func_ref_for_op(dtype, math, "exp")?;
+            let val = build_expression(expr_ctx, node.inputs[0], builder, byte_offset)?;
+            let func_ref = math_func_ref_for_op(expr_ctx.dtype, expr_ctx.math, "exp")?;
             let call = builder.ins().call(func_ref, &[val]);
             Ok(builder.inst_results(call)[0])
         }
         Op::Ln => {
-            let val = build_expression(
-                graph,
-                node.inputs[0],
-                builder,
-                input_ptrs,
-                input_index,
-                byte_offset,
-                math,
-                tracked_byte_offsets,
-                shape_source_map,
-                dtype,
-                cl_type,
-            )?;
-            let func_ref = math_func_ref_for_op(dtype, math, "ln")?;
+            let val = build_expression(expr_ctx, node.inputs[0], builder, byte_offset)?;
+            let func_ref = math_func_ref_for_op(expr_ctx.dtype, expr_ctx.math, "ln")?;
             let call = builder.ins().call(func_ref, &[val]);
             Ok(builder.inst_results(call)[0])
         }
         Op::Sqrt => {
-            let val = build_expression(
-                graph,
-                node.inputs[0],
-                builder,
-                input_ptrs,
-                input_index,
-                byte_offset,
-                math,
-                tracked_byte_offsets,
-                shape_source_map,
-                dtype,
-                cl_type,
-            )?;
-            if !dtype.is_float() {
-                return Err(anyhow::anyhow!("sqrt not supported for {:?}", dtype));
+            let val = build_expression(expr_ctx, node.inputs[0], builder, byte_offset)?;
+            if !expr_ctx.dtype.is_float() {
+                return Err(anyhow::anyhow!(
+                    "sqrt not supported for {:?}",
+                    expr_ctx.dtype
+                ));
             }
             Ok(builder.ins().sqrt(val))
         }

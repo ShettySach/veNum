@@ -48,7 +48,7 @@ impl KernelSignature {
         hash_expr(
             graph,
             kernel.expr_root,
-            &input_index,
+            input_index,
             &kernel.input_trackers,
             &kernel.shape_source_map,
             &mut hasher,
