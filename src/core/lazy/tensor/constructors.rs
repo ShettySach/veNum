@@ -53,6 +53,22 @@ impl Tensor {
         }
     }
 
+    pub fn from_slice_f32_1d(cx: &Context, data: &[f32]) -> Self {
+        Self::from_slice(cx, data, vec![data.len()])
+    }
+
+    pub fn from_slice_f64_1d(cx: &Context, data: &[f64]) -> Self {
+        Self::from_slice_f64(cx, data, vec![data.len()])
+    }
+
+    pub fn from_slice_i32_1d(cx: &Context, data: &[i32]) -> Self {
+        Self::from_slice_i32(cx, data, vec![data.len()])
+    }
+
+    pub fn from_slice_i64_1d(cx: &Context, data: &[i64]) -> Self {
+        Self::from_slice_i64(cx, data, vec![data.len()])
+    }
+
     pub fn constant(cx: &Context, value: f32, shape: Vec<usize>) -> Self {
         let graph = cx.graph();
         let id = graph

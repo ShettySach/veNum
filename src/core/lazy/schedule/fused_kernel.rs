@@ -36,17 +36,15 @@ pub struct FusedKernel {
     /// For pure elementwise kernels this equals `output_shape`;
     /// for reduce kernels this is the pre-reduce input shape.
     pub iter_shape: Vec<usize>,
-    /// Dense map from NodeId.0 -> tracker for inputs reached through absorbed shape ops.
-    pub input_trackers: Vec<Option<ShapeTracker>>,
-    /// Dense map from shape-op NodeId.0 -> ultimate source buffer NodeId.
+    /// Tracker for inputs reached through absorbed shape ops, keyed by source NodeId.
+    pub input_trackers: HashMap<NodeId, ShapeTracker>,
+    /// Maps absorbed shape-op NodeId to its ultimate source buffer NodeId.
     /// Used by the JIT to resolve graph references that point at absorbed shape ops.
-    pub shape_source_map: Vec<Option<NodeId>>,
-    /// Dense map from NodeId.0 -> index in `input_buffers`.
-    pub input_index_map: Vec<Option<usize>>,
+    pub shape_source_map: HashMap<NodeId, NodeId>,
+    /// Maps source NodeId to its index in `input_buffers`.
+    pub input_index_map: HashMap<NodeId, usize>,
     /// True if at least one tracked input has a non-contiguous layout.
     pub has_noncontiguous_trackers: bool,
-    /// Number of entries in `shape_source_map` that are Some.
-    pub num_absorbed_shape_ops: usize,
     /// Optional tracker that maps kernel iteration indices to final output
     /// layout when downstream shape ops are absorbed (forward fusion).
     pub output_tracker: Option<ShapeTracker>,
@@ -80,9 +78,8 @@ pub(super) fn collect_kernel_inputs(
     consumer_counts: &HashMap<NodeId, usize>,
     inlined: &mut HashSet<NodeId>,
     inputs: &mut Vec<NodeId>,
-    trackers: &mut Vec<Option<ShapeTracker>>,
-    source_map: &mut Vec<Option<NodeId>>,
-    num_absorbed_shape_ops: &mut usize,
+    trackers: &mut HashMap<NodeId, ShapeTracker>,
+    source_map: &mut HashMap<NodeId, NodeId>,
     output_shape: &[usize],
 ) {
     let node = graph.node(id);
@@ -104,10 +101,7 @@ pub(super) fn collect_kernel_inputs(
                 // Mark all shape ops in the chain as inlined and record source mapping.
                 for &shape_id in &chain {
                     inlined.insert(shape_id);
-                    if source_map[shape_id.0].is_none() {
-                        *num_absorbed_shape_ops += 1;
-                    }
-                    source_map[shape_id.0] = Some(source);
+                    source_map.insert(shape_id, source);
                 }
 
                 // If the tracker is contiguous, the source's elements map 1:1
@@ -130,7 +124,6 @@ pub(super) fn collect_kernel_inputs(
                         inputs,
                         trackers,
                         source_map,
-                        num_absorbed_shape_ops,
                         output_shape,
                     );
                 } else {
@@ -138,7 +131,7 @@ pub(super) fn collect_kernel_inputs(
                     if !inputs.contains(&source) {
                         inputs.push(source);
                     }
-                    trackers[source.0] = Some(tracker);
+                    trackers.insert(source, tracker);
                 }
                 continue;
             }
@@ -158,7 +151,6 @@ pub(super) fn collect_kernel_inputs(
                 inputs,
                 trackers,
                 source_map,
-                num_absorbed_shape_ops,
                 output_shape,
             );
         } else {

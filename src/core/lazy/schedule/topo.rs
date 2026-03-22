@@ -9,12 +9,12 @@ use super::fused_kernel::{
 };
 use super::schedule_item::ScheduleItem;
 
-fn build_input_index_map(graph_nodes_len: usize, input_buffers: &[NodeId]) -> Vec<Option<usize>> {
-    let mut map = vec![None; graph_nodes_len];
-    for (i, &buf_id) in input_buffers.iter().enumerate() {
-        map[buf_id.0] = Some(i);
-    }
-    map
+fn build_input_index_map(input_buffers: &[NodeId]) -> HashMap<NodeId, usize> {
+    input_buffers
+        .iter()
+        .enumerate()
+        .map(|(i, &buf_id)| (buf_id, i))
+        .collect()
 }
 
 fn find_single_consumer(
@@ -84,16 +84,37 @@ fn build_output_tracker_chain(
     Some((current, tracker, chain))
 }
 
-/// Build a linear execution schedule from the graph, rooted at `root`.
-pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
+// ── Analysis types ──────────────────────────────────────────────────────
+
+/// Per-node analysis result from pass 1.
+struct NodePlan {
+    /// Nodes absorbed into this planned item (inlined elementwise, shape ops, consts).
+    absorbed: HashSet<NodeId>,
+    /// The schedule item to emit for this node.
+    item: ScheduleItem,
+}
+
+/// Full analysis result from pass 1.
+struct ScheduleAnalysis {
+    topo: Vec<NodeId>,
+    /// Global set of all absorbed/inlined nodes.
+    inlined: HashSet<NodeId>,
+    /// Planned item per topo-visit node id. Keyed by the node id at which
+    /// the analysis was triggered, NOT by `FusedKernel.root` (which may
+    /// differ due to forward fusion).
+    planned: Vec<Option<ScheduleItem>>,
+}
+
+// ── Pass 1: analyze ─────────────────────────────────────────────────────
+
+fn analyze_schedule(graph: &Graph, root: NodeId) -> ScheduleAnalysis {
     let topo = topo_sort(graph, root);
     let topo_set: HashSet<NodeId> = topo.iter().copied().collect();
     let consumer_counts = compute_consumer_counts(graph, &topo);
 
-    // Nodes that are inlined into fused elementwise kernels.
     let mut inlined: HashSet<NodeId> = HashSet::new();
-
-    let mut schedule = Vec::new();
+    let mut planned: Vec<Option<ScheduleItem>> =
+        (0..graph.nodes.len()).map(|_| None).collect();
 
     for &id in &topo {
         if inlined.contains(&id) {
@@ -102,208 +123,243 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
 
         let node = graph.node(id);
 
-        // Leaves don't need a schedule item.
         if matches!(node.op, Op::Load | Op::Const(_)) {
             continue;
         }
 
-        // Shape ops are barriers unless absorbed by an elementwise consumer.
-        if node.op.is_shape_op() {
-            let input = node.inputs[0];
-            schedule.push(ScheduleItem::Shape(ShapeOpItem {
-                root: id,
-                op: node.op.clone(),
-                input,
-                shape: node.shape.clone(),
-            }));
+        let plan = if node.op.is_shape_op() {
+            analyze_shape_node(graph, id)
+        } else if node.op.is_reduce_op() {
+            analyze_reduce_node(graph, id, &consumer_counts, &topo_set)
+        } else if node.op.is_elementwise() {
+            analyze_elementwise_node(graph, id, &consumer_counts, &topo_set)
+        } else {
+            continue;
+        };
+
+        inlined.extend(plan.absorbed.iter().copied());
+        planned[id.0] = Some(plan.item);
+    }
+
+    ScheduleAnalysis {
+        topo,
+        inlined,
+        planned,
+    }
+}
+
+fn analyze_shape_node(graph: &Graph, id: NodeId) -> NodePlan {
+    let node = graph.node(id);
+    NodePlan {
+        absorbed: HashSet::new(),
+        item: ScheduleItem::Shape(ShapeOpItem {
+            root: id,
+            op: node.op.clone(),
+            input: node.inputs[0],
+            shape: node.shape.clone(),
+        }),
+    }
+}
+
+fn analyze_elementwise_node(
+    graph: &Graph,
+    id: NodeId,
+    consumer_counts: &HashMap<NodeId, usize>,
+    topo_set: &HashSet<NodeId>,
+) -> NodePlan {
+    let mut absorbed = HashSet::new();
+    let mut input_buffers = Vec::new();
+    let mut input_trackers = HashMap::new();
+    let mut shape_source_map = HashMap::new();
+    let output_shape = graph.node(id).shape.clone();
+    let mut kernel_root = id;
+
+    collect_kernel_inputs(
+        graph,
+        id,
+        consumer_counts,
+        &mut absorbed,
+        &mut input_buffers,
+        &mut input_trackers,
+        &mut shape_source_map,
+        &output_shape,
+    );
+
+    let output_tracker = if let Some((final_root, tracker, chain)) =
+        build_output_tracker_chain(graph, id, consumer_counts, topo_set)
+    {
+        absorbed.extend(chain.iter().copied());
+        kernel_root = final_root;
+        Some(tracker)
+    } else {
+        None
+    };
+
+    let input_index_map = build_input_index_map(&input_buffers);
+
+    NodePlan {
+        absorbed,
+        item: ScheduleItem::Fused(FusedKernel {
+            root: kernel_root,
+            expr_root: id,
+            input_buffers,
+            numel: graph.node(kernel_root).numel(),
+            output_shape: output_shape.clone(),
+            iter_shape: output_shape,
+            has_noncontiguous_trackers: input_trackers.values().any(|t| !t.is_contiguous()),
+            input_index_map,
+            input_trackers,
+            shape_source_map,
+            output_tracker,
+            reduce: None,
+        }),
+    }
+}
+
+fn analyze_reduce_node(
+    graph: &Graph,
+    id: NodeId,
+    consumer_counts: &HashMap<NodeId, usize>,
+    topo_set: &HashSet<NodeId>,
+) -> NodePlan {
+    let node = graph.node(id);
+    let expr_input = node.inputs[0];
+
+    if let Some(reduce_spec) = reduce_spec_from_op(&node.op) {
+        if let Some(plan) =
+            try_fused_reduce(graph, id, expr_input, reduce_spec, consumer_counts, topo_set)
+        {
+            return plan;
+        }
+    }
+
+    // Fallback: interpreted reduce.
+    NodePlan {
+        absorbed: HashSet::new(),
+        item: ScheduleItem::Reduce(ReduceOpItem {
+            root: id,
+            op: node.op.clone(),
+            input: expr_input,
+            shape: node.shape.clone(),
+        }),
+    }
+}
+
+/// Try to build a fused reduce kernel. Returns `None` if fusion isn't possible,
+/// leaving no partial state behind.
+fn try_fused_reduce(
+    graph: &Graph,
+    id: NodeId,
+    expr_input: NodeId,
+    reduce_spec: ReduceSpec,
+    consumer_counts: &HashMap<NodeId, usize>,
+    topo_set: &HashSet<NodeId>,
+) -> Option<NodePlan> {
+    let node = graph.node(id);
+    let expr_node = graph.node(expr_input);
+
+    let can_fuse = expr_node.op.is_elementwise()
+        || expr_node.op.is_shape_op()
+        || matches!(expr_node.op, Op::Load | Op::Const(_));
+
+    if !can_fuse {
+        return None;
+    }
+
+    let mut absorbed = HashSet::new();
+    let mut kernel_root = id;
+    let iter_shape = expr_node.shape.clone();
+    let mut input_buffers = Vec::new();
+    let mut input_trackers = HashMap::new();
+    let mut shape_source_map = HashMap::new();
+
+    if matches!(expr_node.op, Op::Load | Op::Const(_)) {
+        if matches!(expr_node.op, Op::Load) {
+            input_buffers.push(expr_input);
+        }
+    } else if expr_node.op.is_shape_op() {
+        let (source, tracker, chain) =
+            try_build_tracker(graph, expr_input, consumer_counts, &iter_shape)?;
+        for &shape_id in &chain {
+            absorbed.insert(shape_id);
+            shape_source_map.insert(shape_id, source);
+        }
+        if !input_buffers.contains(&source) {
+            input_buffers.push(source);
+        }
+        input_trackers.insert(source, tracker);
+    } else {
+        // Elementwise root — collect inputs recursively.
+        collect_kernel_inputs(
+            graph,
+            expr_input,
+            consumer_counts,
+            &mut absorbed,
+            &mut input_buffers,
+            &mut input_trackers,
+            &mut shape_source_map,
+            &iter_shape,
+        );
+        absorbed.insert(expr_input);
+    }
+
+    let output_tracker = if let Some((final_root, tracker, chain)) =
+        build_output_tracker_chain(graph, id, consumer_counts, topo_set)
+    {
+        absorbed.extend(chain.iter().copied());
+        kernel_root = final_root;
+        Some(tracker)
+    } else {
+        None
+    };
+
+    let input_index_map = build_input_index_map(&input_buffers);
+
+    Some(NodePlan {
+        absorbed,
+        item: ScheduleItem::Fused(FusedKernel {
+            root: kernel_root,
+            expr_root: expr_input,
+            input_buffers,
+            numel: graph.node(kernel_root).numel(),
+            output_shape: node.shape.clone(),
+            iter_shape,
+            has_noncontiguous_trackers: input_trackers.values().any(|t| !t.is_contiguous()),
+            input_index_map,
+            input_trackers,
+            shape_source_map,
+            output_tracker,
+            reduce: Some(reduce_spec),
+        }),
+    })
+}
+
+// ── Pass 2: emit ────────────────────────────────────────────────────────
+
+fn emit_schedule(analysis: &mut ScheduleAnalysis) -> Vec<ScheduleItem> {
+    let mut schedule = Vec::new();
+
+    for &id in &analysis.topo {
+        if analysis.inlined.contains(&id) {
             continue;
         }
-
-        // Reduce ops: try to fuse upstream elementwise/shape ops into a
-        // single JIT kernel. Fall back to interpreted if fusion isn't possible.
-        if node.op.is_reduce_op() {
-            let expr_input = node.inputs[0];
-
-            if let Some(reduce_spec) = reduce_spec_from_op(&node.op) {
-                let expr_node = graph.node(expr_input);
-                let can_fuse = expr_node.op.is_elementwise()
-                    || expr_node.op.is_shape_op()
-                    || matches!(expr_node.op, Op::Load | Op::Const(_));
-
-                if can_fuse {
-                    let mut kernel_root = id;
-                    let iter_shape = expr_node.shape.clone();
-                    let mut input_buffers = Vec::new();
-                    let mut input_trackers = vec![None; graph.nodes.len()];
-                    let mut shape_source_map = vec![None; graph.nodes.len()];
-                    let mut num_absorbed_shape_ops = 0usize;
-
-                    if matches!(expr_node.op, Op::Load | Op::Const(_)) {
-                        // Direct leaf — add as input buffer.
-                        if matches!(expr_node.op, Op::Load) {
-                            input_buffers.push(expr_input);
-                        }
-                    } else if expr_node.op.is_shape_op() {
-                        // Shape op chain: try to absorb via tracker, with the
-                        // source Load becoming the input buffer.
-                        if let Some((source, tracker, chain)) =
-                            try_build_tracker(graph, expr_input, &consumer_counts, &iter_shape)
-                        {
-                            for &shape_id in &chain {
-                                inlined.insert(shape_id);
-                                if shape_source_map[shape_id.0].is_none() {
-                                    num_absorbed_shape_ops += 1;
-                                }
-                                shape_source_map[shape_id.0] = Some(source);
-                            }
-                            if !input_buffers.contains(&source) {
-                                input_buffers.push(source);
-                            }
-                            input_trackers[source.0] = Some(tracker);
-                        } else {
-                            // Can't absorb shape ops — fall through to interpreted.
-                            let input = node.inputs[0];
-                            schedule.push(ScheduleItem::Reduce(ReduceOpItem {
-                                root: id,
-                                op: node.op.clone(),
-                                input,
-                                shape: node.shape.clone(),
-                            }));
-                            continue;
-                        }
-                    } else {
-                        // Elementwise root — collect inputs recursively.
-                        collect_kernel_inputs(
-                            graph,
-                            expr_input,
-                            &consumer_counts,
-                            &mut inlined,
-                            &mut input_buffers,
-                            &mut input_trackers,
-                            &mut shape_source_map,
-                            &mut num_absorbed_shape_ops,
-                            &iter_shape,
-                        );
-                        inlined.insert(expr_input);
-                    }
-
-                    let output_tracker = if let Some((final_root, tracker, chain)) =
-                        build_output_tracker_chain(graph, id, &consumer_counts, &topo_set)
-                    {
-                        for &shape_id in &chain {
-                            inlined.insert(shape_id);
-                        }
-                        kernel_root = final_root;
-                        Some(tracker)
-                    } else {
-                        None
-                    };
-
-                    // Remove previously emitted items whose roots were absorbed.
-                    schedule.retain(|item| match item {
-                        ScheduleItem::Shape(s) => !inlined.contains(&s.root),
-                        ScheduleItem::Fused(k) => !inlined.contains(&k.root),
-                        _ => true,
-                    });
-
-                    let input_index_map = build_input_index_map(graph.nodes.len(), &input_buffers);
-                    schedule.push(ScheduleItem::Fused(FusedKernel {
-                        root: kernel_root,
-                        expr_root: expr_input,
-                        input_buffers,
-                        numel: graph.node(kernel_root).numel(),
-                        output_shape: node.shape.clone(),
-                        iter_shape,
-                        has_noncontiguous_trackers: input_trackers
-                            .iter()
-                            .filter_map(|t| t.as_ref())
-                            .any(|t| !t.is_contiguous()),
-                        input_index_map,
-                        input_trackers,
-                        shape_source_map,
-                        num_absorbed_shape_ops,
-                        output_tracker,
-                        reduce: Some(reduce_spec),
-                    }));
-                    continue;
-                }
-            }
-
-            // Fallback: interpreted reduce.
-            let input = node.inputs[0];
-            schedule.push(ScheduleItem::Reduce(ReduceOpItem {
-                root: id,
-                op: node.op.clone(),
-                input,
-                shape: node.shape.clone(),
-            }));
-            continue;
-        }
-
-        // Elementwise ops can be fused, absorbing shape ops along the way.
-        if node.op.is_elementwise() {
-            let mut input_buffers = Vec::new();
-            let mut input_trackers = vec![None; graph.nodes.len()];
-            let mut shape_source_map = vec![None; graph.nodes.len()];
-            let mut num_absorbed_shape_ops = 0usize;
-            let output_shape = node.shape.clone();
-            let mut kernel_root = id;
-
-            collect_kernel_inputs(
-                graph,
-                id,
-                &consumer_counts,
-                &mut inlined,
-                &mut input_buffers,
-                &mut input_trackers,
-                &mut shape_source_map,
-                &mut num_absorbed_shape_ops,
-                &output_shape,
-            );
-
-            // Remove previously emitted items whose roots were absorbed.
-            let output_tracker = if let Some((final_root, tracker, chain)) =
-                build_output_tracker_chain(graph, id, &consumer_counts, &topo_set)
-            {
-                for &shape_id in &chain {
-                    inlined.insert(shape_id);
-                }
-                kernel_root = final_root;
-                Some(tracker)
-            } else {
-                None
-            };
-
-            schedule.retain(|item| match item {
-                ScheduleItem::Shape(s) => !inlined.contains(&s.root),
-                ScheduleItem::Fused(k) => !inlined.contains(&k.root),
-                _ => true,
-            });
-
-            let input_index_map = build_input_index_map(graph.nodes.len(), &input_buffers);
-            schedule.push(ScheduleItem::Fused(FusedKernel {
-                root: kernel_root,
-                expr_root: id,
-                input_buffers,
-                numel: graph.node(kernel_root).numel(),
-                output_shape: output_shape.clone(),
-                iter_shape: output_shape,
-                has_noncontiguous_trackers: input_trackers
-                    .iter()
-                    .filter_map(|t| t.as_ref())
-                    .any(|t| !t.is_contiguous()),
-                input_index_map,
-                input_trackers,
-                shape_source_map,
-                num_absorbed_shape_ops,
-                output_tracker,
-                reduce: None,
-            }));
+        if let Some(item) = analysis.planned[id.0].take() {
+            schedule.push(item);
         }
     }
 
     schedule
 }
+
+// ── Public entry point ──────────────────────────────────────────────────
+
+/// Build a linear execution schedule from the graph, rooted at `root`.
+pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
+    let mut analysis = analyze_schedule(graph, root);
+    emit_schedule(&mut analysis)
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────
 
 /// Topological sort via reverse post-order DFS, rooted at `root`.
 fn topo_sort(graph: &Graph, root: NodeId) -> Vec<NodeId> {

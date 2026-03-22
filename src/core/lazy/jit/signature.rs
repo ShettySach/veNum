@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use super::super::graph::{Graph, NodeId, Op};
@@ -61,9 +62,9 @@ impl KernelSignature {
 fn hash_expr(
     graph: &Graph,
     id: NodeId,
-    input_index: &[Option<usize>],
-    trackers: &[Option<ShapeTracker>],
-    source_map: &[Option<NodeId>],
+    input_index: &HashMap<NodeId, usize>,
+    trackers: &HashMap<NodeId, ShapeTracker>,
+    source_map: &HashMap<NodeId, NodeId>,
     hasher: &mut impl Hasher,
 ) {
     let node = graph.node(id);
@@ -75,22 +76,22 @@ fn hash_expr(
         Op::Const(v) => v.hash(hasher),
         Op::Load => {
             // Leaf - hash its input index and any tracker.
-            let resolved = source_map[id.0].unwrap_or(id);
-            if let Some(idx) = input_index[resolved.0] {
+            let resolved = source_map.get(&id).copied().unwrap_or(id);
+            if let Some(&idx) = input_index.get(&resolved) {
                 0u8.hash(hasher); // tag: indexed input
                 idx.hash(hasher);
-                if let Some(tracker) = trackers[resolved.0].as_ref() {
+                if let Some(tracker) = trackers.get(&resolved) {
                     hash_tracker(tracker, hasher);
                 }
             }
         }
         op if !op.is_elementwise() => {
             // Inlined shape op resolved to a source buffer.
-            let resolved = source_map[id.0].unwrap_or(id);
-            if let Some(idx) = input_index[resolved.0] {
+            let resolved = source_map.get(&id).copied().unwrap_or(id);
+            if let Some(&idx) = input_index.get(&resolved) {
                 1u8.hash(hasher); // tag: resolved shape op
                 idx.hash(hasher);
-                if let Some(tracker) = trackers[resolved.0].as_ref() {
+                if let Some(tracker) = trackers.get(&resolved) {
                     hash_tracker(tracker, hasher);
                 }
             }

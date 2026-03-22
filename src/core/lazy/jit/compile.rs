@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::Result;
 use cranelift::prelude::*;
 use cranelift_codegen::ir::Function;
@@ -5,7 +7,7 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{Linkage, Module};
 
 use super::super::dtype::DType;
-use super::super::graph::Graph;
+use super::super::graph::{Graph, NodeId};
 use super::super::schedule::{FusedKernel, ReduceKind};
 use super::compiled::CompiledKernel;
 use super::expr::build_expression;
@@ -32,7 +34,7 @@ pub fn compile_kernel(
     capture_ir: bool,
 ) -> Result<CompiledKernel> {
     let num_inputs = kernel.input_buffers.len();
-    let has_trackers = !kernel.input_trackers.iter().all(|t| t.is_none());
+    let has_trackers = !kernel.input_trackers.is_empty();
     let dtype = graph.node(kernel.root).dtype;
     let cl_type = dtype_to_cl_type(dtype);
     let elem_size = dtype.size_bytes() as i64;
@@ -163,7 +165,7 @@ fn emit_elementwise_kernel(
     kernel: &FusedKernel,
     builder: &mut FunctionBuilder,
     input_ptrs: &[Value],
-    input_index: &[Option<usize>],
+    input_index: &HashMap<NodeId, usize>,
     out_ptr: Value,
     n_param: Value,
     math_refs: &super::math::MathFuncRefs,
@@ -215,17 +217,14 @@ fn emit_elementwise_kernel(
     };
 
     // Pre-compute per-input byte offsets from trackers.
-    let mut tracked_byte_offsets: Vec<Option<Value>> = vec![None; graph.nodes.len()];
-    for (buf_idx, tracker_opt) in kernel.input_trackers.iter().enumerate() {
-        let Some(tracker) = tracker_opt else {
-            continue;
-        };
+    let mut tracked_byte_offsets: HashMap<NodeId, Value> = HashMap::new();
+    for (&node_id, tracker) in &kernel.input_trackers {
         if tracker.is_contiguous() {
             // Contiguous tracker: flat offset is equivalent, no decomposition needed.
-            tracked_byte_offsets[buf_idx] = Some(byte_offset);
+            tracked_byte_offsets.insert(node_id, byte_offset);
         } else if let Some(ref dims) = dim_indices {
             let tracked_offset = compute_tracker_byte_offset(builder, dims, tracker, elem_size);
-            tracked_byte_offsets[buf_idx] = Some(tracked_offset);
+            tracked_byte_offsets.insert(node_id, tracked_offset);
         }
     }
 
@@ -292,7 +291,7 @@ fn emit_reduce_kernel(
     kernel: &FusedKernel,
     builder: &mut FunctionBuilder,
     input_ptrs: &[Value],
-    input_index: &[Option<usize>],
+    input_index: &HashMap<NodeId, usize>,
     out_ptr: Value,
     n_param: Value,
     math_refs: &super::math::MathFuncRefs,
@@ -382,13 +381,10 @@ fn emit_reduce_kernel(
     let iter_byte_offset = builder.ins().imul(iter_flat, elem_size_val);
 
     // Compute per-input tracked byte offsets from iter_idx.
-    let mut tracked_byte_offsets: Vec<Option<Value>> = vec![None; graph.nodes.len()];
-    for (buf_idx, tracker_opt) in kernel.input_trackers.iter().enumerate() {
-        let Some(tracker) = tracker_opt else {
-            continue;
-        };
+    let mut tracked_byte_offsets: HashMap<NodeId, Value> = HashMap::new();
+    for (&node_id, tracker) in &kernel.input_trackers {
         let tracked_offset = compute_tracker_byte_offset(builder, &iter_idx, tracker, elem_size);
-        tracked_byte_offsets[buf_idx] = Some(tracked_offset);
+        tracked_byte_offsets.insert(node_id, tracked_offset);
     }
 
     // Evaluate the expression tree at the current iteration index.

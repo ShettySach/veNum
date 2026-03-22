@@ -79,7 +79,7 @@ impl Tensor {
 
                     for &buf_id in &kernel.input_buffers {
                         let node = exec_graph.node(buf_id);
-                        if let Some(Some(tracker)) = kernel.input_trackers.get(buf_id.0) {
+                        if let Some(tracker) = kernel.input_trackers.get(&buf_id) {
                             writeln!(
                                 out,
                                 "      {:?} {:?} → tracker shape={:?} strides={:?} offset={}",
@@ -91,11 +91,11 @@ impl Tensor {
                         }
                     }
 
-                    if kernel.num_absorbed_shape_ops > 0 {
+                    if !kernel.shape_source_map.is_empty() {
                         writeln!(
                             out,
                             "    absorbed {} shape ops",
-                            kernel.num_absorbed_shape_ops
+                            kernel.shape_source_map.len()
                         )
                         .unwrap();
                     }

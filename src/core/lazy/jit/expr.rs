@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::Result;
 use cranelift::prelude::{types, FunctionBuilder, InstBuilder, MemFlags, Value};
 
@@ -11,11 +13,11 @@ pub(super) fn build_expression(
     id: NodeId,
     builder: &mut FunctionBuilder,
     input_ptrs: &[Value],
-    input_index: &[Option<usize>],
+    input_index: &HashMap<NodeId, usize>,
     byte_offset: Value,
     math: &MathFuncRefs,
-    tracked_byte_offsets: &[Option<Value>],
-    shape_source_map: &[Option<NodeId>],
+    tracked_byte_offsets: &HashMap<NodeId, Value>,
+    shape_source_map: &HashMap<NodeId, NodeId>,
     dtype: DType,
     cl_type: types::Type,
 ) -> Result<Value> {
@@ -23,11 +25,11 @@ pub(super) fn build_expression(
 
     match &node.op {
         op if !op.is_elementwise() && !matches!(op, Op::Const(_)) => {
-            let resolved_id = shape_source_map[id.0].unwrap_or(id);
-            if let Some(idx) = input_index[resolved_id.0] {
+            let resolved_id = shape_source_map.get(&id).copied().unwrap_or(id);
+            if let Some(&idx) = input_index.get(&resolved_id) {
                 // Source is a buffer input — load via tracked or flat offset.
                 let ptr = input_ptrs[idx];
-                let offset = tracked_byte_offsets[resolved_id.0].unwrap_or(byte_offset);
+                let offset = tracked_byte_offsets.get(&resolved_id).copied().unwrap_or(byte_offset);
                 let addr = builder.ins().iadd(ptr, offset);
                 Ok(builder.ins().load(cl_type, MemFlags::new(), addr, 0))
             } else {
@@ -49,10 +51,11 @@ pub(super) fn build_expression(
             }
         }
         Op::Load => {
-            let idx = input_index[id.0]
+            let &idx = input_index
+                .get(&id)
                 .ok_or_else(|| anyhow::anyhow!("Load node {:?} not found in input_index", id))?;
             let ptr = input_ptrs[idx];
-            let offset = tracked_byte_offsets[id.0].unwrap_or(byte_offset);
+            let offset = tracked_byte_offsets.get(&id).copied().unwrap_or(byte_offset);
             let addr = builder.ins().iadd(ptr, offset);
             Ok(builder.ins().load(cl_type, MemFlags::new(), addr, 0))
         }
