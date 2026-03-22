@@ -1,7 +1,6 @@
 use crate::core::lazy::dtype::Scalar;
 
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub enum Op {
     // Leaf
     Const(Scalar),

@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 use std::cmp::Ordering;
 
 use crate::core::iters::Indexer;
-use crate::core::lazy::dtype::{Buffer, Scalar};
+use crate::core::lazy::dtype::Buffer;
 use crate::core::lazy::graph::Op;
 
 pub(crate) fn execute_reduce_op_typed(
@@ -294,14 +294,4 @@ fn idx_to_offset(index: &[usize], shape: &[usize]) -> usize {
         stride *= shape[d];
     }
     off
-}
-
-#[allow(dead_code)]
-fn scalar_to_usize(s: Scalar) -> usize {
-    match s {
-        Scalar::F32(v) => v as usize,
-        Scalar::F64(v) => v as usize,
-        Scalar::I32(v) => v as usize,
-        Scalar::I64(v) => v as usize,
-    }
 }

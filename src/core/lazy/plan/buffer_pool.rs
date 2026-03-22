@@ -35,11 +35,4 @@ impl BufferPool {
         }
         vec![0u8; numel * dtype.size_bytes()]
     }
-
-    /// Return a byte buffer to the pool for future reuse.
-    #[allow(dead_code)]
-    pub fn release(&mut self, dtype: DType, numel: usize, buf: Vec<u8>) {
-        let key = PoolKey { dtype, numel };
-        self.pool.entry(key).or_default().push(buf);
-    }
 }

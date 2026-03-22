@@ -39,7 +39,6 @@ pub enum ExecItem {
 /// Built once from a computation graph + schedule, then replayed
 /// on each `realize()` call by binding runtime input buffers and
 /// executing each `ExecItem` in order.
-#[allow(dead_code)]
 pub struct ExecutionPlan {
     /// The self-contained execution graph (optimized/cloned subgraph).
     pub exec_graph: Graph,

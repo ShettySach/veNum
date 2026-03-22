@@ -1,24 +1,4 @@
-use anyhow::{bail, Result};
-use std::borrow::Cow;
-
 use crate::core::lazy::dtype::{Buffer, DType, Scalar};
-use crate::core::lazy::graph::{Graph, NodeId};
-
-#[allow(dead_code)]
-pub(crate) fn get_realized_buffer<'a>(
-    graph: &'a Graph,
-    node_id: NodeId,
-    realized: &'a std::collections::HashMap<NodeId, Buffer>,
-    context: &str,
-) -> Result<Cow<'a, Buffer>> {
-    if let Some(buf) = realized.get(&node_id) {
-        Ok(Cow::Borrowed(buf))
-    } else if let Some(ref buf) = graph.node(node_id).buffer {
-        Ok(Cow::Borrowed(buf))
-    } else {
-        bail!("{} input {:?} is not realized", context, node_id);
-    }
-}
 
 pub(crate) fn scalar_fill_buffer(val: Scalar, numel: usize) -> Buffer {
     match val {
