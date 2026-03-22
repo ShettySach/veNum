@@ -198,7 +198,13 @@ fn emit_elementwise_kernel(
 
     // Check if any tracker is non-contiguous and actually needs index
     // decomposition. Contiguous trackers can just use the flat byte offset.
-    let needs_decompose = has_trackers && kernel.has_noncontiguous_trackers;
+    let output_tracker_noncontig = kernel
+        .output_tracker
+        .as_ref()
+        .map(|t| !t.is_contiguous())
+        .unwrap_or(false);
+    let needs_decompose =
+        (has_trackers && kernel.has_noncontiguous_trackers) || output_tracker_noncontig;
 
     // If we have non-contiguous trackers, decompose flat index `i` into
     // multi-dim indices. Contiguous trackers reuse the flat byte offset.
@@ -237,8 +243,21 @@ fn emit_elementwise_kernel(
         cl_type,
     )?;
 
-    // Store result to out[i]
-    let out_addr = builder.ins().iadd(out_ptr, byte_offset);
+    // Store result to out[...], applying any forward-fused output tracker.
+    let out_byte_offset = if let Some(tracker) = kernel.output_tracker.as_ref() {
+        if tracker.is_contiguous() {
+            byte_offset
+        } else if let Some(ref dims) = dim_indices {
+            compute_tracker_byte_offset(builder, dims, tracker, elem_size)
+        } else {
+            let dims = decompose_flat_index(builder, i, &kernel.output_shape);
+            compute_tracker_byte_offset(builder, &dims, tracker, elem_size)
+        }
+    } else {
+        byte_offset
+    };
+
+    let out_addr = builder.ins().iadd(out_ptr, out_byte_offset);
     builder.ins().store(MemFlags::new(), result, out_addr, 0);
 
     // i += 1, jump back to header
@@ -401,7 +420,15 @@ fn emit_reduce_kernel(
     builder.seal_block(red_exit);
     let acc_final = builder.block_params(red_exit)[0];
 
-    let out_byte_offset = builder.ins().imul(out_i, elem_size_val);
+    let out_byte_offset = if let Some(tracker) = kernel.output_tracker.as_ref() {
+        if tracker.is_contiguous() {
+            builder.ins().imul(out_i, elem_size_val)
+        } else {
+            compute_tracker_byte_offset(builder, &out_idx, tracker, elem_size)
+        }
+    } else {
+        builder.ins().imul(out_i, elem_size_val)
+    };
     let out_addr = builder.ins().iadd(out_ptr, out_byte_offset);
     builder.ins().store(MemFlags::new(), acc_final, out_addr, 0);
 

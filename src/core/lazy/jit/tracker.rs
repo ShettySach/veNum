@@ -40,17 +40,28 @@ pub(super) fn compute_tracker_byte_offset(
     elem_size: i64,
 ) -> Value {
     let mut sum = builder.ins().iconst(types::I64, tracker.offset as i64);
+    let tracker_rank = tracker.strides.len();
+    let idx_rank = dim_indices.len();
+    let pad_front = tracker_rank.saturating_sub(idx_rank);
+    let drop_front = idx_rank.saturating_sub(tracker_rank);
+    let zero = builder.ins().iconst(types::I64, 0);
 
     for (d, &stride) in tracker.strides.iter().enumerate() {
         if stride == 0 {
             // Broadcast dimension, contributes nothing.
             continue;
         }
-        if d >= dim_indices.len() {
-            break;
-        }
+        let logical_idx = if tracker_rank >= idx_rank {
+            if d < pad_front {
+                zero
+            } else {
+                dim_indices[d - pad_front]
+            }
+        } else {
+            dim_indices[d + drop_front]
+        };
         let stride_val = builder.ins().iconst(types::I64, stride as i64);
-        let contribution = builder.ins().imul(dim_indices[d], stride_val);
+        let contribution = builder.ins().imul(logical_idx, stride_val);
         sum = builder.ins().iadd(sum, contribution);
     }
 

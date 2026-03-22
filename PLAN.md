@@ -232,6 +232,12 @@ These optimizations may help with scaling but require benchmarking to confirm be
 - Implement only if profiling shows > 2% time spent here
 - Otherwise, defer to later cleanup phase
 
+**POSSIBLE_OPTIMIZATION**:
+- Forward fusion currently may need O(nodes) scans to locate a single consumer node.
+- If profiling shows scheduler overhead from these scans, add a reverse-edge map
+  (producer -> consumers) during topo/schedule construction so single-consumer
+  lookups become O(1)-ish instead of graph-wide scans.
+
 ---
 
 ## Phase 4: Deferred Optimizations (Future Work)

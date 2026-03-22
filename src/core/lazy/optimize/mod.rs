@@ -16,7 +16,8 @@ pub fn optimize(graph: &Graph, root: NodeId) -> Result<(Graph, NodeId)> {
     let mut program = egglog_program::commands();
 
     // Insert our DAG as egglog terms without any text parsing.
-    program.extend(egglog_program::graph_to_actions(graph, root));
+    let program_data = egglog_program::graph_to_actions(graph, root);
+    program.extend(program_data.actions);
 
     // Equality saturation: 10 iterations over the default ruleset.
     program.push(egglog::ast::Command::RunSchedule(
@@ -54,7 +55,14 @@ pub fn optimize(graph: &Graph, root: NodeId) -> Result<(Graph, NodeId)> {
 
     // Parse extracted term back into a new Graph.
     let root_dtype = graph.node(root).dtype;
-    let (new_graph, new_root) = parse::parse_extracted_term(graph, &termdag, &term, root_dtype)?;
+    let (new_graph, new_root) = parse::parse_extracted_term(
+        graph,
+        &termdag,
+        &term,
+        root_dtype,
+        &program_data.shapes,
+        &program_data.perms,
+    )?;
 
     Ok((new_graph, new_root))
 }

@@ -47,6 +47,9 @@ pub struct FusedKernel {
     pub has_noncontiguous_trackers: bool,
     /// Number of entries in `shape_source_map` that are Some.
     pub num_absorbed_shape_ops: usize,
+    /// Optional tracker that maps kernel iteration indices to final output
+    /// layout when downstream shape ops are absorbed (forward fusion).
+    pub output_tracker: Option<ShapeTracker>,
     /// Present for reduce-fused kernels.
     pub reduce: Option<ReduceSpec>,
 }

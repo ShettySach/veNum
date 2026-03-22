@@ -10,9 +10,19 @@ pub(super) fn parse_extracted_term(
     termdag: &egglog::TermDag,
     term: &egglog::Term,
     root_dtype: DType,
+    shape_table: &[Vec<usize>],
+    perm_table: &[Vec<usize>],
 ) -> Result<(Graph, NodeId)> {
     let mut graph = Graph::new();
-    let root = parse_term(original, termdag, term, &mut graph, root_dtype)?;
+    let root = parse_term(
+        original,
+        termdag,
+        term,
+        &mut graph,
+        root_dtype,
+        shape_table,
+        perm_table,
+    )?;
     Ok((graph, root))
 }
 
@@ -22,7 +32,16 @@ fn parse_term(
     term: &egglog::Term,
     graph: &mut Graph,
     dtype: DType,
+    shape_table: &[Vec<usize>],
+    perm_table: &[Vec<usize>],
 ) -> Result<NodeId> {
+    fn parse_idx(termdag: &egglog::TermDag, tid: &egglog::TermId, what: &str) -> Result<usize> {
+        let egglog::Term::Lit(egglog::ast::Literal::Int(raw)) = termdag.get(*tid) else {
+            bail!("{} expects int literal", what);
+        };
+        usize::try_from(*raw).context("id out of range")
+    }
+
     match term {
         egglog::Term::App(head, args) => match (head.as_str(), args.as_slice()) {
             ("tLoad", [id]) => {
@@ -53,8 +72,24 @@ fn parse_term(
                 }))
             }
             ("tAdd", [a, b]) | ("tSub", [a, b]) | ("tMul", [a, b]) | ("tDiv", [a, b]) => {
-                let lhs = parse_term(original, termdag, termdag.get(*a), graph, dtype)?;
-                let rhs = parse_term(original, termdag, termdag.get(*b), graph, dtype)?;
+                let lhs = parse_term(
+                    original,
+                    termdag,
+                    termdag.get(*a),
+                    graph,
+                    dtype,
+                    shape_table,
+                    perm_table,
+                )?;
+                let rhs = parse_term(
+                    original,
+                    termdag,
+                    termdag.get(*b),
+                    graph,
+                    dtype,
+                    shape_table,
+                    perm_table,
+                )?;
                 let op = match head.as_str() {
                     "tAdd" => Op::Add,
                     "tSub" => Op::Sub,
@@ -72,7 +107,15 @@ fn parse_term(
                 }))
             }
             ("tExp", [a]) | ("tLn", [a]) | ("tSqrt", [a]) | ("tNeg", [a]) => {
-                let arg = parse_term(original, termdag, termdag.get(*a), graph, dtype)?;
+                let arg = parse_term(
+                    original,
+                    termdag,
+                    termdag.get(*a),
+                    graph,
+                    dtype,
+                    shape_table,
+                    perm_table,
+                )?;
                 let op = match head.as_str() {
                     "tExp" => Op::Exp,
                     "tLn" => Op::Ln,
@@ -83,6 +126,156 @@ fn parse_term(
                 let shape = graph.node(arg).shape.clone();
                 Ok(graph.add_node(Node {
                     op,
+                    inputs: vec![arg],
+                    shape,
+                    dtype,
+                    buffer: None,
+                }))
+            }
+            ("tReshape", [a, sid]) => {
+                let arg = parse_term(
+                    original,
+                    termdag,
+                    termdag.get(*a),
+                    graph,
+                    dtype,
+                    shape_table,
+                    perm_table,
+                )?;
+                let shape_idx = parse_idx(termdag, sid, "tReshape")?;
+                let shape = shape_table
+                    .get(shape_idx)
+                    .cloned()
+                    .context("tReshape shape id out of range")?;
+                Ok(graph.add_node(Node {
+                    op: Op::Reshape,
+                    inputs: vec![arg],
+                    shape,
+                    dtype,
+                    buffer: None,
+                }))
+            }
+            ("tPermute", [a, pid]) => {
+                let arg = parse_term(
+                    original,
+                    termdag,
+                    termdag.get(*a),
+                    graph,
+                    dtype,
+                    shape_table,
+                    perm_table,
+                )?;
+                let perm_idx = parse_idx(termdag, pid, "tPermute")?;
+                let perm = perm_table
+                    .get(perm_idx)
+                    .cloned()
+                    .context("tPermute permutation id out of range")?;
+                let in_shape = graph.node(arg).shape.clone();
+                let shape: Vec<usize> = perm.iter().map(|&i| in_shape[i]).collect();
+                Ok(graph.add_node(Node {
+                    op: Op::Permute(perm),
+                    inputs: vec![arg],
+                    shape,
+                    dtype,
+                    buffer: None,
+                }))
+            }
+            ("tTranspose", [a, d1, d2]) => {
+                let arg = parse_term(
+                    original,
+                    termdag,
+                    termdag.get(*a),
+                    graph,
+                    dtype,
+                    shape_table,
+                    perm_table,
+                )?;
+                let dim_1 = parse_idx(termdag, d1, "tTranspose")?;
+                let dim_2 = parse_idx(termdag, d2, "tTranspose")?;
+                let mut shape = graph.node(arg).shape.clone();
+                shape.swap(dim_1, dim_2);
+                Ok(graph.add_node(Node {
+                    op: Op::Transpose(dim_1, dim_2),
+                    inputs: vec![arg],
+                    shape,
+                    dtype,
+                    buffer: None,
+                }))
+            }
+            ("tExpand", [a, sid]) => {
+                let arg = parse_term(
+                    original,
+                    termdag,
+                    termdag.get(*a),
+                    graph,
+                    dtype,
+                    shape_table,
+                    perm_table,
+                )?;
+                let shape_idx = parse_idx(termdag, sid, "tExpand")?;
+                let shape = shape_table
+                    .get(shape_idx)
+                    .cloned()
+                    .context("tExpand shape id out of range")?;
+                Ok(graph.add_node(Node {
+                    op: Op::Expand,
+                    inputs: vec![arg],
+                    shape,
+                    dtype,
+                    buffer: None,
+                }))
+            }
+            ("tSqueeze", [a]) => {
+                let arg = parse_term(
+                    original,
+                    termdag,
+                    termdag.get(*a),
+                    graph,
+                    dtype,
+                    shape_table,
+                    perm_table,
+                )?;
+                let mut shape: Vec<usize> = graph
+                    .node(arg)
+                    .shape
+                    .iter()
+                    .copied()
+                    .filter(|&s| s != 1)
+                    .collect();
+                if shape.is_empty() {
+                    shape.push(1);
+                }
+                Ok(graph.add_node(Node {
+                    op: Op::Squeeze,
+                    inputs: vec![arg],
+                    shape,
+                    dtype,
+                    buffer: None,
+                }))
+            }
+            ("tUnsqueeze", [a, rank]) => {
+                let arg = parse_term(
+                    original,
+                    termdag,
+                    termdag.get(*a),
+                    graph,
+                    dtype,
+                    shape_table,
+                    perm_table,
+                )?;
+                let new_rank = parse_idx(termdag, rank, "tUnsqueeze")?;
+                let in_shape = graph.node(arg).shape.clone();
+                if new_rank < in_shape.len() {
+                    bail!(
+                        "tUnsqueeze new rank {} smaller than {}",
+                        new_rank,
+                        in_shape.len()
+                    );
+                }
+                let mut shape = vec![1; new_rank - in_shape.len()];
+                shape.extend_from_slice(&in_shape);
+                Ok(graph.add_node(Node {
+                    op: Op::Unsqueeze(new_rank),
                     inputs: vec![arg],
                     shape,
                     dtype,

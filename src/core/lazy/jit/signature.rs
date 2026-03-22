@@ -26,6 +26,12 @@ impl KernelSignature {
 
         // Hash iter_shape and reduce spec for reduce-fused kernels.
         kernel.iter_shape.hash(&mut hasher);
+        if let Some(ref tracker) = kernel.output_tracker {
+            1u8.hash(&mut hasher);
+            hash_tracker(tracker, &mut hasher);
+        } else {
+            0u8.hash(&mut hasher);
+        }
         if let Some(ref reduce) = kernel.reduce {
             1u8.hash(&mut hasher);
             reduce.op.hash(&mut hasher);

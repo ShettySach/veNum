@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::super::graph::{Graph, NodeId, Op};
+use super::super::shape_tracker::ShapeTracker;
 
 use super::fused_kernel::{
     collect_kernel_inputs, try_build_tracker, FusedKernel, ReduceKind, ReduceOpItem, ReduceSpec,
@@ -16,9 +17,77 @@ fn build_input_index_map(graph_nodes_len: usize, input_buffers: &[NodeId]) -> Ve
     map
 }
 
+fn find_single_consumer(
+    graph: &Graph,
+    producer: NodeId,
+    topo_set: &HashSet<NodeId>,
+) -> Option<NodeId> {
+    for (idx, node) in graph.nodes.iter().enumerate() {
+        let nid = NodeId(idx);
+        if !topo_set.contains(&nid) {
+            continue;
+        }
+        if node.inputs.contains(&producer) {
+            return Some(nid);
+        }
+    }
+    None
+}
+
+fn build_output_tracker_chain(
+    graph: &Graph,
+    start: NodeId,
+    consumer_counts: &HashMap<NodeId, usize>,
+    topo_set: &HashSet<NodeId>,
+) -> Option<(NodeId, ShapeTracker, Vec<NodeId>)> {
+    let mut current = start;
+    let mut chain = Vec::new();
+
+    while *consumer_counts.get(&current).unwrap_or(&0) == 1 {
+        let Some(next) = find_single_consumer(graph, current, topo_set) else {
+            break;
+        };
+        let next_node = graph.node(next);
+        if !next_node.op.is_shape_op() {
+            break;
+        }
+        chain.push(next);
+        current = next;
+    }
+
+    if chain.is_empty() {
+        return None;
+    }
+
+    let mut tracker = ShapeTracker::contiguous(&graph.node(start).shape);
+
+    for &shape_id in &chain {
+        let node = graph.node(shape_id);
+        tracker = match &node.op {
+            Op::Reshape => tracker.reshape(&node.shape),
+            // Forward-fused output chains must preserve numel. Expand changes
+            // cardinality and would require different iteration semantics.
+            Op::Expand => return None,
+            Op::Permute(axes) => tracker.permute(axes),
+            Op::Transpose(d1, d2) => tracker.transpose(*d1, *d2),
+            Op::Squeeze => Some(tracker.squeeze()),
+            Op::Unsqueeze(new_rank) => tracker.unsqueeze(*new_rank),
+            Op::Flip(dims) => Some(tracker.flip(dims)),
+            _ => return None,
+        }?;
+    }
+
+    if graph.node(start).numel() != graph.node(current).numel() {
+        return None;
+    }
+
+    Some((current, tracker, chain))
+}
+
 /// Build a linear execution schedule from the graph, rooted at `root`.
 pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
     let topo = topo_sort(graph, root);
+    let topo_set: HashSet<NodeId> = topo.iter().copied().collect();
     let consumer_counts = compute_consumer_counts(graph, &topo);
 
     // Nodes that are inlined into fused elementwise kernels.
@@ -62,6 +131,7 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
                     || matches!(expr_node.op, Op::Load | Op::Const(_));
 
                 if can_fuse {
+                    let mut kernel_root = id;
                     let iter_shape = expr_node.shape.clone();
                     let mut input_buffers = Vec::new();
                     let mut input_trackers = vec![None; graph.nodes.len()];
@@ -117,6 +187,18 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
                         inlined.insert(expr_input);
                     }
 
+                    let output_tracker = if let Some((final_root, tracker, chain)) =
+                        build_output_tracker_chain(graph, id, &consumer_counts, &topo_set)
+                    {
+                        for &shape_id in &chain {
+                            inlined.insert(shape_id);
+                        }
+                        kernel_root = final_root;
+                        Some(tracker)
+                    } else {
+                        None
+                    };
+
                     // Remove previously emitted items whose roots were absorbed.
                     schedule.retain(|item| match item {
                         ScheduleItem::Shape(s) => !inlined.contains(&s.root),
@@ -126,10 +208,10 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
 
                     let input_index_map = build_input_index_map(graph.nodes.len(), &input_buffers);
                     schedule.push(ScheduleItem::Fused(FusedKernel {
-                        root: id,
+                        root: kernel_root,
                         expr_root: expr_input,
                         input_buffers,
-                        numel: node.numel(),
+                        numel: graph.node(kernel_root).numel(),
                         output_shape: node.shape.clone(),
                         iter_shape,
                         has_noncontiguous_trackers: input_trackers
@@ -140,6 +222,7 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
                         input_trackers,
                         shape_source_map,
                         num_absorbed_shape_ops,
+                        output_tracker,
                         reduce: Some(reduce_spec),
                     }));
                     continue;
@@ -164,6 +247,7 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
             let mut shape_source_map = vec![None; graph.nodes.len()];
             let mut num_absorbed_shape_ops = 0usize;
             let output_shape = node.shape.clone();
+            let mut kernel_root = id;
 
             collect_kernel_inputs(
                 graph,
@@ -178,6 +262,18 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
             );
 
             // Remove previously emitted items whose roots were absorbed.
+            let output_tracker = if let Some((final_root, tracker, chain)) =
+                build_output_tracker_chain(graph, id, &consumer_counts, &topo_set)
+            {
+                for &shape_id in &chain {
+                    inlined.insert(shape_id);
+                }
+                kernel_root = final_root;
+                Some(tracker)
+            } else {
+                None
+            };
+
             schedule.retain(|item| match item {
                 ScheduleItem::Shape(s) => !inlined.contains(&s.root),
                 ScheduleItem::Fused(k) => !inlined.contains(&k.root),
@@ -186,10 +282,10 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
 
             let input_index_map = build_input_index_map(graph.nodes.len(), &input_buffers);
             schedule.push(ScheduleItem::Fused(FusedKernel {
-                root: id,
+                root: kernel_root,
                 expr_root: id,
                 input_buffers,
-                numel: node.numel(),
+                numel: graph.node(kernel_root).numel(),
                 output_shape: output_shape.clone(),
                 iter_shape: output_shape,
                 has_noncontiguous_trackers: input_trackers
@@ -200,6 +296,7 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
                 input_trackers,
                 shape_source_map,
                 num_absorbed_shape_ops,
+                output_tracker,
                 reduce: None,
             }));
         }

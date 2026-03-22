@@ -1,5 +1,8 @@
 #[cfg(test)]
 mod lazy_tests {
+    use super::super::dtype::Buffer;
+    use super::super::graph::{Graph, Op};
+    use super::super::schedule::{build_schedule, ScheduleItem};
     use crate::{Context, Tensor};
     use anyhow::Result;
 
@@ -269,6 +272,138 @@ mod lazy_tests {
         let result = (&a - &a)?.realize()?;
         assert_eq!(*result.data(), [0.0, 0.0, 0.0]);
         Ok(())
+    }
+
+    #[test]
+    fn egglog_shape_ops_optimize_and_execute() -> Result<()> {
+        let cx = Context::new();
+
+        // Reshape/transpose/squeeze/unsqueeze chain should stay optimize-safe
+        // and preserve values.
+        let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        let r = a
+            .reshape(vec![1, 2, 2])?
+            .transpose(1, 2)?
+            .squeeze()?
+            .unsqueeze(3)?
+            .realize()?;
+
+        assert_eq!(*r.data(), [1.0, 3.0, 2.0, 4.0]);
+        assert_eq!(r.sizes(), &[1, 2, 2]);
+        Ok(())
+    }
+
+    #[test]
+    fn forward_fusion_basic_reshape() -> Result<()> {
+        let cx = Context::new();
+
+        let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![4]);
+        let b = Tensor::from_slice(&cx, &[10.0, 20.0, 30.0, 40.0], vec![4]);
+        let y = (&a + &b)?.reshape(vec![2, 2])?;
+
+        let fused = y.render_fused_dag();
+        assert!(!fused.contains("Shape Op"));
+
+        let out = y.realize()?;
+        assert_eq!(out.sizes(), &[2, 2]);
+        assert_eq!(*out.data(), [11.0, 22.0, 33.0, 44.0]);
+        Ok(())
+    }
+
+    #[test]
+    fn forward_fusion_transpose() -> Result<()> {
+        let cx = Context::new();
+
+        let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        let b = Tensor::from_slice(&cx, &[10.0, 20.0, 30.0, 40.0], vec![2, 2]);
+        let y = (&a + &b)?.transpose(0, 1)?;
+
+        let fused = y.render_fused_dag();
+        assert!(!fused.contains("Shape Op"));
+
+        let out = y.realize()?;
+        assert_eq!(out.sizes(), &[2, 2]);
+        assert_eq!(*out.data(), [11.0, 33.0, 22.0, 44.0]);
+        Ok(())
+    }
+
+    #[test]
+    fn forward_fusion_shape_chain() -> Result<()> {
+        let cx = Context::new();
+
+        let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        let b = Tensor::from_slice(&cx, &[10.0, 20.0, 30.0, 40.0], vec![2, 2]);
+        let y = (&a + &b)?.reshape(vec![1, 2, 2])?.squeeze()?.unsqueeze(3)?;
+
+        let fused = y.render_fused_dag();
+        assert!(!fused.contains("Shape Op"));
+
+        let out = y.realize()?;
+        assert_eq!(out.sizes(), &[1, 2, 2]);
+        assert_eq!(*out.data(), [11.0, 22.0, 33.0, 44.0]);
+        Ok(())
+    }
+
+    #[test]
+    fn phase2_optimized_fused_dag_has_no_shape_barriers() -> Result<()> {
+        let cx = Context::new();
+
+        let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        let b = Tensor::from_slice(&cx, &[10.0, 20.0, 30.0, 40.0], vec![2, 2]);
+
+        let y = (&a.reshape(vec![1, 2, 2])?.reshape(vec![1, 2, 2])?
+            + &b.reshape(vec![1, 2, 2])?)?
+            .transpose(1, 2)?
+            .transpose(1, 2)?
+            .squeeze()?
+            .unsqueeze(3)?;
+
+        let fused = y.render_optimized_fused_dag()?;
+        assert!(!fused.contains("Shape Op"));
+
+        let out = y.realize()?;
+        assert_eq!(out.sizes(), &[1, 2, 2]);
+        assert_eq!(*out.data(), [11.0, 22.0, 33.0, 44.0]);
+        Ok(())
+    }
+
+    #[test]
+    fn forward_fusion_reduce_then_reshape() -> Result<()> {
+        let cx = Context::new();
+
+        let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
+        let y = a.sum_dims(vec![1], true)?.reshape(vec![1, 2])?;
+
+        let fused = y.render_fused_dag();
+        assert!(!fused.contains("Shape Op"));
+
+        let out = y.realize()?;
+        assert_eq!(out.sizes(), &[1, 2]);
+        assert_eq!(*out.data(), [6.0, 15.0]);
+        Ok(())
+    }
+
+    #[test]
+    fn forward_fusion_blocked_by_multiple_consumers() {
+        let mut g = Graph::new();
+        let a = g.load(Buffer::from_f32_vec(vec![1.0, 2.0, 3.0, 4.0]), vec![4]);
+        let b = g.load(Buffer::from_f32_vec(vec![10.0, 20.0, 30.0, 40.0]), vec![4]);
+
+        let add = g.binary(Op::Add, a, b);
+        let neg = g.unary(Op::Neg, add);
+        let reshaped = g.reshape(add, vec![2, 2]);
+        let reshaped_back = g.reshape(reshaped, vec![4]);
+        let root = g.binary(Op::Add, neg, reshaped_back);
+
+        let schedule = build_schedule(&g, root);
+
+        let add_kernel = schedule.iter().find_map(|item| match item {
+            ScheduleItem::Fused(k) if k.expr_root == add => Some(k),
+            _ => None,
+        });
+
+        let add_kernel = add_kernel.expect("expected separate kernel for shared add node");
+        assert!(add_kernel.output_tracker.is_none());
     }
 
     #[test]

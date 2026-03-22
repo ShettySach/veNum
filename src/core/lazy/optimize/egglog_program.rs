@@ -1,9 +1,16 @@
 use egglog::ast::Expr;
 use egglog::prelude::*;
+use std::collections::HashMap;
 
 use super::super::graph::{Graph, NodeId, Op};
 
 const SORT_TEXPR: &str = "TExpr";
+
+pub(super) struct ProgramData {
+    pub actions: Vec<egglog::ast::Command>,
+    pub shapes: Vec<Vec<usize>>,
+    pub perms: Vec<Vec<usize>>,
+}
 
 pub(super) fn commands() -> Vec<egglog::ast::Command> {
     let mut cmds = Vec::new();
@@ -49,6 +56,63 @@ pub(super) fn commands() -> Vec<egglog::ast::Command> {
             unextractable: false,
         });
     }
+    cmds.push(egglog::ast::Command::Constructor {
+        span: span!(),
+        name: "tReshape".to_owned(),
+        schema: egglog::ast::Schema::new(
+            vec![SORT_TEXPR.to_owned(), "i64".to_owned()],
+            SORT_TEXPR.to_owned(),
+        ),
+        cost: None,
+        unextractable: false,
+    });
+    cmds.push(egglog::ast::Command::Constructor {
+        span: span!(),
+        name: "tPermute".to_owned(),
+        schema: egglog::ast::Schema::new(
+            vec![SORT_TEXPR.to_owned(), "i64".to_owned()],
+            SORT_TEXPR.to_owned(),
+        ),
+        cost: None,
+        unextractable: false,
+    });
+    cmds.push(egglog::ast::Command::Constructor {
+        span: span!(),
+        name: "tTranspose".to_owned(),
+        schema: egglog::ast::Schema::new(
+            vec![SORT_TEXPR.to_owned(), "i64".to_owned(), "i64".to_owned()],
+            SORT_TEXPR.to_owned(),
+        ),
+        cost: None,
+        unextractable: false,
+    });
+    cmds.push(egglog::ast::Command::Constructor {
+        span: span!(),
+        name: "tExpand".to_owned(),
+        schema: egglog::ast::Schema::new(
+            vec![SORT_TEXPR.to_owned(), "i64".to_owned()],
+            SORT_TEXPR.to_owned(),
+        ),
+        cost: None,
+        unextractable: false,
+    });
+    cmds.push(egglog::ast::Command::Constructor {
+        span: span!(),
+        name: "tSqueeze".to_owned(),
+        schema: egglog::ast::Schema::new(vec![SORT_TEXPR.to_owned()], SORT_TEXPR.to_owned()),
+        cost: None,
+        unextractable: false,
+    });
+    cmds.push(egglog::ast::Command::Constructor {
+        span: span!(),
+        name: "tUnsqueeze".to_owned(),
+        schema: egglog::ast::Schema::new(
+            vec![SORT_TEXPR.to_owned(), "i64".to_owned()],
+            SORT_TEXPR.to_owned(),
+        ),
+        cost: None,
+        unextractable: false,
+    });
 
     // Add rewrite rules directly as AST.
     cmds.extend(rewrites());
@@ -73,6 +137,12 @@ fn rewrites() -> Vec<egglog::ast::Command> {
     // NOTE: egglog variables are plain identifiers; no '?' prefix.
     let a = exprs::var("a");
     let b = exprs::var("b");
+    let s = exprs::var("s");
+    let s1 = exprs::var("s1");
+    let s2 = exprs::var("s2");
+    let d1 = exprs::var("d1");
+    let d2 = exprs::var("d2");
+    let rank = exprs::var("rank");
     let zero = exprs::call("tConst", vec![exprs::float(0.0)]);
     let one = exprs::call("tConst", vec![exprs::float(1.0)]);
     let two = exprs::call("tConst", vec![exprs::float(2.0)]);
@@ -144,20 +214,202 @@ fn rewrites() -> Vec<egglog::ast::Command> {
             exprs::call("tAdd", vec![a.clone(), a.clone()]),
             exprs::call("tMul", vec![two.clone(), a.clone()]),
         ),
+        // --- Shape simplifications ---
+        rw(
+            exprs::call(
+                "tReshape",
+                vec![
+                    exprs::call("tReshape", vec![a.clone(), s1.clone()]),
+                    s2.clone(),
+                ],
+            ),
+            exprs::call("tReshape", vec![a.clone(), s2.clone()]),
+        ),
+        rw(
+            exprs::call(
+                "tExpand",
+                vec![
+                    exprs::call("tExpand", vec![a.clone(), s1.clone()]),
+                    s2.clone(),
+                ],
+            ),
+            exprs::call("tExpand", vec![a.clone(), s2.clone()]),
+        ),
+        rw(
+            exprs::call(
+                "tTranspose",
+                vec![
+                    exprs::call("tTranspose", vec![a.clone(), d1.clone(), d2.clone()]),
+                    d1.clone(),
+                    d2.clone(),
+                ],
+            ),
+            a.clone(),
+        ),
+        rw(
+            exprs::call(
+                "tUnsqueeze",
+                vec![
+                    exprs::call("tUnsqueeze", vec![a.clone(), rank.clone()]),
+                    rank.clone(),
+                ],
+            ),
+            exprs::call("tUnsqueeze", vec![a.clone(), rank.clone()]),
+        ),
+        rw(
+            exprs::call("tSqueeze", vec![exprs::call("tSqueeze", vec![a.clone()])]),
+            exprs::call("tSqueeze", vec![a.clone()]),
+        ),
+        // --- Elementwise + shape canonicalization (same shape id on both sides) ---
+        rw(
+            exprs::call(
+                "tAdd",
+                vec![
+                    exprs::call("tReshape", vec![a.clone(), s.clone()]),
+                    exprs::call("tReshape", vec![b.clone(), s.clone()]),
+                ],
+            ),
+            exprs::call(
+                "tReshape",
+                vec![exprs::call("tAdd", vec![a.clone(), b.clone()]), s.clone()],
+            ),
+        ),
+        rw(
+            exprs::call(
+                "tSub",
+                vec![
+                    exprs::call("tReshape", vec![a.clone(), s.clone()]),
+                    exprs::call("tReshape", vec![b.clone(), s.clone()]),
+                ],
+            ),
+            exprs::call(
+                "tReshape",
+                vec![exprs::call("tSub", vec![a.clone(), b.clone()]), s.clone()],
+            ),
+        ),
+        rw(
+            exprs::call(
+                "tMul",
+                vec![
+                    exprs::call("tReshape", vec![a.clone(), s.clone()]),
+                    exprs::call("tReshape", vec![b.clone(), s.clone()]),
+                ],
+            ),
+            exprs::call(
+                "tReshape",
+                vec![exprs::call("tMul", vec![a.clone(), b.clone()]), s.clone()],
+            ),
+        ),
+        rw(
+            exprs::call(
+                "tDiv",
+                vec![
+                    exprs::call("tReshape", vec![a.clone(), s.clone()]),
+                    exprs::call("tReshape", vec![b.clone(), s.clone()]),
+                ],
+            ),
+            exprs::call(
+                "tReshape",
+                vec![exprs::call("tDiv", vec![a.clone(), b.clone()]), s.clone()],
+            ),
+        ),
+        rw(
+            exprs::call(
+                "tNeg",
+                vec![exprs::call("tReshape", vec![a.clone(), s.clone()])],
+            ),
+            exprs::call(
+                "tReshape",
+                vec![exprs::call("tNeg", vec![a.clone()]), s.clone()],
+            ),
+        ),
+        rw(
+            exprs::call(
+                "tExp",
+                vec![exprs::call("tReshape", vec![a.clone(), s.clone()])],
+            ),
+            exprs::call(
+                "tReshape",
+                vec![exprs::call("tExp", vec![a.clone()]), s.clone()],
+            ),
+        ),
+        rw(
+            exprs::call(
+                "tLn",
+                vec![exprs::call("tReshape", vec![a.clone(), s.clone()])],
+            ),
+            exprs::call(
+                "tReshape",
+                vec![exprs::call("tLn", vec![a.clone()]), s.clone()],
+            ),
+        ),
+        rw(
+            exprs::call(
+                "tSqrt",
+                vec![exprs::call("tReshape", vec![a.clone(), s.clone()])],
+            ),
+            exprs::call(
+                "tReshape",
+                vec![exprs::call("tSqrt", vec![a.clone()]), s.clone()],
+            ),
+        ),
     ]
 }
 
-pub(super) fn graph_to_actions(graph: &Graph, root: NodeId) -> Vec<egglog::ast::Command> {
+pub(super) fn graph_to_actions(graph: &Graph, root: NodeId) -> ProgramData {
     let mut memo: Vec<Option<Expr>> = vec![None; graph.nodes.len()];
-    let root_expr = node_expr(graph, root, &mut memo);
-    vec![egglog::ast::Command::Action(egglog::ast::Action::Let(
+    let mut shape_ids: HashMap<Vec<usize>, i64> = HashMap::new();
+    let mut shape_table: Vec<Vec<usize>> = Vec::new();
+    let mut perm_ids: HashMap<Vec<usize>, i64> = HashMap::new();
+    let mut perm_table: Vec<Vec<usize>> = Vec::new();
+
+    let root_expr = node_expr(
+        graph,
+        root,
+        &mut memo,
+        &mut shape_ids,
+        &mut shape_table,
+        &mut perm_ids,
+        &mut perm_table,
+    );
+    let actions = vec![egglog::ast::Command::Action(egglog::ast::Action::Let(
         span!(),
         "root".to_owned(),
         root_expr,
-    ))]
+    ))];
+
+    ProgramData {
+        actions,
+        shapes: shape_table,
+        perms: perm_table,
+    }
 }
 
-fn node_expr(graph: &Graph, id: NodeId, memo: &mut [Option<Expr>]) -> Expr {
+fn intern_id(
+    map: &mut HashMap<Vec<usize>, i64>,
+    table: &mut Vec<Vec<usize>>,
+    data: &[usize],
+) -> i64 {
+    if let Some(id) = map.get(data) {
+        *id
+    } else {
+        let id = table.len() as i64;
+        let key = data.to_vec();
+        table.push(key.clone());
+        map.insert(key, id);
+        id
+    }
+}
+
+fn node_expr(
+    graph: &Graph,
+    id: NodeId,
+    memo: &mut [Option<Expr>],
+    shape_ids: &mut HashMap<Vec<usize>, i64>,
+    shape_table: &mut Vec<Vec<usize>>,
+    perm_ids: &mut HashMap<Vec<usize>, i64>,
+    perm_table: &mut Vec<Vec<usize>>,
+) -> Expr {
     if let Some(expr) = memo[id.0].clone() {
         return expr;
     }
@@ -169,46 +421,244 @@ fn node_expr(graph: &Graph, id: NodeId, memo: &mut [Option<Expr>]) -> Expr {
         Op::Add => exprs::call(
             "tAdd",
             vec![
-                node_expr(graph, node.inputs[0], memo),
-                node_expr(graph, node.inputs[1], memo),
+                node_expr(
+                    graph,
+                    node.inputs[0],
+                    memo,
+                    shape_ids,
+                    shape_table,
+                    perm_ids,
+                    perm_table,
+                ),
+                node_expr(
+                    graph,
+                    node.inputs[1],
+                    memo,
+                    shape_ids,
+                    shape_table,
+                    perm_ids,
+                    perm_table,
+                ),
             ],
         ),
         Op::Sub => exprs::call(
             "tSub",
             vec![
-                node_expr(graph, node.inputs[0], memo),
-                node_expr(graph, node.inputs[1], memo),
+                node_expr(
+                    graph,
+                    node.inputs[0],
+                    memo,
+                    shape_ids,
+                    shape_table,
+                    perm_ids,
+                    perm_table,
+                ),
+                node_expr(
+                    graph,
+                    node.inputs[1],
+                    memo,
+                    shape_ids,
+                    shape_table,
+                    perm_ids,
+                    perm_table,
+                ),
             ],
         ),
         Op::Mul => exprs::call(
             "tMul",
             vec![
-                node_expr(graph, node.inputs[0], memo),
-                node_expr(graph, node.inputs[1], memo),
+                node_expr(
+                    graph,
+                    node.inputs[0],
+                    memo,
+                    shape_ids,
+                    shape_table,
+                    perm_ids,
+                    perm_table,
+                ),
+                node_expr(
+                    graph,
+                    node.inputs[1],
+                    memo,
+                    shape_ids,
+                    shape_table,
+                    perm_ids,
+                    perm_table,
+                ),
             ],
         ),
         Op::Div => exprs::call(
             "tDiv",
             vec![
-                node_expr(graph, node.inputs[0], memo),
-                node_expr(graph, node.inputs[1], memo),
+                node_expr(
+                    graph,
+                    node.inputs[0],
+                    memo,
+                    shape_ids,
+                    shape_table,
+                    perm_ids,
+                    perm_table,
+                ),
+                node_expr(
+                    graph,
+                    node.inputs[1],
+                    memo,
+                    shape_ids,
+                    shape_table,
+                    perm_ids,
+                    perm_table,
+                ),
             ],
         ),
-        Op::Exp => exprs::call("tExp", vec![node_expr(graph, node.inputs[0], memo)]),
-        Op::Ln => exprs::call("tLn", vec![node_expr(graph, node.inputs[0], memo)]),
-        Op::Sqrt => exprs::call("tSqrt", vec![node_expr(graph, node.inputs[0], memo)]),
-        Op::Neg => exprs::call("tNeg", vec![node_expr(graph, node.inputs[0], memo)]),
+        Op::Exp => exprs::call(
+            "tExp",
+            vec![node_expr(
+                graph,
+                node.inputs[0],
+                memo,
+                shape_ids,
+                shape_table,
+                perm_ids,
+                perm_table,
+            )],
+        ),
+        Op::Ln => exprs::call(
+            "tLn",
+            vec![node_expr(
+                graph,
+                node.inputs[0],
+                memo,
+                shape_ids,
+                shape_table,
+                perm_ids,
+                perm_table,
+            )],
+        ),
+        Op::Sqrt => exprs::call(
+            "tSqrt",
+            vec![node_expr(
+                graph,
+                node.inputs[0],
+                memo,
+                shape_ids,
+                shape_table,
+                perm_ids,
+                perm_table,
+            )],
+        ),
+        Op::Neg => exprs::call(
+            "tNeg",
+            vec![node_expr(
+                graph,
+                node.inputs[0],
+                memo,
+                shape_ids,
+                shape_table,
+                perm_ids,
+                perm_table,
+            )],
+        ),
+        Op::Reshape => {
+            let shape_id = intern_id(shape_ids, shape_table, &node.shape);
+            exprs::call(
+                "tReshape",
+                vec![
+                    node_expr(
+                        graph,
+                        node.inputs[0],
+                        memo,
+                        shape_ids,
+                        shape_table,
+                        perm_ids,
+                        perm_table,
+                    ),
+                    exprs::int(shape_id),
+                ],
+            )
+        }
+        Op::Permute(axes) => {
+            let perm_id = intern_id(perm_ids, perm_table, axes);
+            exprs::call(
+                "tPermute",
+                vec![
+                    node_expr(
+                        graph,
+                        node.inputs[0],
+                        memo,
+                        shape_ids,
+                        shape_table,
+                        perm_ids,
+                        perm_table,
+                    ),
+                    exprs::int(perm_id),
+                ],
+            )
+        }
+        Op::Transpose(d1, d2) => exprs::call(
+            "tTranspose",
+            vec![
+                node_expr(
+                    graph,
+                    node.inputs[0],
+                    memo,
+                    shape_ids,
+                    shape_table,
+                    perm_ids,
+                    perm_table,
+                ),
+                exprs::int(*d1 as i64),
+                exprs::int(*d2 as i64),
+            ],
+        ),
+        Op::Expand => {
+            let shape_id = intern_id(shape_ids, shape_table, &node.shape);
+            exprs::call(
+                "tExpand",
+                vec![
+                    node_expr(
+                        graph,
+                        node.inputs[0],
+                        memo,
+                        shape_ids,
+                        shape_table,
+                        perm_ids,
+                        perm_table,
+                    ),
+                    exprs::int(shape_id),
+                ],
+            )
+        }
+        Op::Squeeze => exprs::call(
+            "tSqueeze",
+            vec![node_expr(
+                graph,
+                node.inputs[0],
+                memo,
+                shape_ids,
+                shape_table,
+                perm_ids,
+                perm_table,
+            )],
+        ),
+        Op::Unsqueeze(new_rank) => exprs::call(
+            "tUnsqueeze",
+            vec![
+                node_expr(
+                    graph,
+                    node.inputs[0],
+                    memo,
+                    shape_ids,
+                    shape_table,
+                    perm_ids,
+                    perm_table,
+                ),
+                exprs::int(*new_rank as i64),
+            ],
+        ),
 
-        // Non-elementwise / shape ops are currently not modeled in egglog.
-        // Keep optimizer safe by treating them as opaque leaves.
-        Op::Reshape
-        | Op::Permute(_)
-        | Op::Transpose(_, _)
-        | Op::Expand
-        | Op::Slice(_)
+        // Ops not modeled in egglog remain opaque leaves.
+        Op::Slice(_)
         | Op::Flip(_)
-        | Op::Squeeze
-        | Op::Unsqueeze(_)
         | Op::Pad(_, _)
         | Op::Sum(_, _)
         | Op::Prod(_, _)

@@ -41,7 +41,13 @@ pub(super) fn is_optimize_safe(graph: &Graph, root: NodeId) -> bool {
             | Op::Exp
             | Op::Ln
             | Op::Sqrt
-            | Op::Neg => node.inputs.iter().all(|&inp| dfs(graph, inp, seen)),
+            | Op::Neg
+            | Op::Reshape
+            | Op::Permute(_)
+            | Op::Transpose(_, _)
+            | Op::Expand
+            | Op::Squeeze
+            | Op::Unsqueeze(_) => node.inputs.iter().all(|&inp| dfs(graph, inp, seen)),
             _ => false,
         }
     }
