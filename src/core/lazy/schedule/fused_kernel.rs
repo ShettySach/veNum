@@ -41,8 +41,10 @@ pub struct FusedKernel {
     /// Dense map from shape-op NodeId.0 -> ultimate source buffer NodeId.
     /// Used by the JIT to resolve graph references that point at absorbed shape ops.
     pub shape_source_map: Vec<Option<NodeId>>,
-    /// Number of entries in `input_trackers` that are Some.
-    pub num_tracked_inputs: usize,
+    /// Dense map from NodeId.0 -> index in `input_buffers`.
+    pub input_index_map: Vec<Option<usize>>,
+    /// True if at least one tracked input has a non-contiguous layout.
+    pub has_noncontiguous_trackers: bool,
     /// Number of entries in `shape_source_map` that are Some.
     pub num_absorbed_shape_ops: usize,
     /// Present for reduce-fused kernels.
@@ -77,7 +79,6 @@ pub(super) fn collect_kernel_inputs(
     inputs: &mut Vec<NodeId>,
     trackers: &mut Vec<Option<ShapeTracker>>,
     source_map: &mut Vec<Option<NodeId>>,
-    num_tracked_inputs: &mut usize,
     num_absorbed_shape_ops: &mut usize,
     output_shape: &[usize],
 ) {
@@ -126,7 +127,6 @@ pub(super) fn collect_kernel_inputs(
                         inputs,
                         trackers,
                         source_map,
-                        num_tracked_inputs,
                         num_absorbed_shape_ops,
                         output_shape,
                     );
@@ -134,9 +134,6 @@ pub(super) fn collect_kernel_inputs(
                     // The source becomes a kernel input with a tracker.
                     if !inputs.contains(&source) {
                         inputs.push(source);
-                    }
-                    if trackers[source.0].is_none() {
-                        *num_tracked_inputs += 1;
                     }
                     trackers[source.0] = Some(tracker);
                 }
@@ -158,7 +155,6 @@ pub(super) fn collect_kernel_inputs(
                 inputs,
                 trackers,
                 source_map,
-                num_tracked_inputs,
                 num_absorbed_shape_ops,
                 output_shape,
             );

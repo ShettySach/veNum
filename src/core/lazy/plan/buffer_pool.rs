@@ -29,9 +29,7 @@ impl BufferPool {
     pub fn acquire(&mut self, dtype: DType, numel: usize) -> Vec<u8> {
         let key = PoolKey { dtype, numel };
         if let Some(stack) = self.pool.get_mut(&key) {
-            if let Some(mut buf) = stack.pop() {
-                // Zero out the reused buffer.
-                buf.iter_mut().for_each(|b| *b = 0);
+            if let Some(buf) = stack.pop() {
                 return buf;
             }
         }

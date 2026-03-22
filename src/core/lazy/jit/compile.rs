@@ -9,7 +9,6 @@ use super::super::graph::Graph;
 use super::super::schedule::{FusedKernel, ReduceKind};
 use super::compiled::CompiledKernel;
 use super::expr::build_expression;
-use super::index_map::build_input_index_map;
 use super::math::{declare_math_funcs, declare_math_refs, register_math_symbols};
 use super::tracker::{compute_tracker_byte_offset, decompose_flat_index, flatten_multi_index};
 
@@ -33,12 +32,12 @@ pub fn compile_kernel(
     capture_ir: bool,
 ) -> Result<CompiledKernel> {
     let num_inputs = kernel.input_buffers.len();
-    let has_trackers = kernel.num_tracked_inputs > 0;
+    let has_trackers = !kernel.input_trackers.iter().all(|t| t.is_none());
     let dtype = graph.node(kernel.root).dtype;
     let cl_type = dtype_to_cl_type(dtype);
     let elem_size = dtype.size_bytes() as i64;
 
-    let input_index = build_input_index_map(graph.nodes.len(), &kernel.input_buffers);
+    let input_index = &kernel.input_index_map;
 
     // --- Cranelift setup ---
     let mut flag_builder = settings::builder();
@@ -199,11 +198,7 @@ fn emit_elementwise_kernel(
 
     // Check if any tracker is non-contiguous and actually needs index
     // decomposition. Contiguous trackers can just use the flat byte offset.
-    let needs_decompose = has_trackers
-        && kernel
-            .input_trackers
-            .iter()
-            .any(|t| t.as_ref().is_some_and(|tr| !tr.is_contiguous()));
+    let needs_decompose = has_trackers && kernel.has_noncontiguous_trackers;
 
     // If we have non-contiguous trackers, decompose flat index `i` into
     // multi-dim indices. Contiguous trackers reuse the flat byte offset.

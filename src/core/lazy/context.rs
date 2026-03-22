@@ -1,17 +1,17 @@
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use super::backend::{Backend, CpuBackend};
 use super::graph::Graph;
 use super::jit::KernelSignature;
 use super::kernel::ExecutableKernel;
+use super::lru_cache::LruCache;
 use super::plan::{BufferPool, ExecutionPlan, GraphSignature};
 
 /// Cache of JIT-compiled kernels keyed by structural signature.
-pub(crate) type KernelCache = Arc<Mutex<HashMap<KernelSignature, Arc<dyn ExecutableKernel>>>>;
+pub(crate) type KernelCache = Arc<Mutex<LruCache<KernelSignature, Arc<dyn ExecutableKernel>>>>;
 
 /// Cache of execution plans keyed by graph signature.
-pub(crate) type PlanCache = Arc<Mutex<HashMap<GraphSignature, Arc<ExecutionPlan>>>>;
+pub(crate) type PlanCache = Arc<Mutex<LruCache<GraphSignature, Arc<ExecutionPlan>>>>;
 
 /// Shared pool of reusable byte buffers.
 pub(crate) type SharedBufferPool = Arc<Mutex<BufferPool>>;
@@ -39,14 +39,24 @@ impl Default for Context {
 }
 
 impl Context {
+    const DEFAULT_KERNEL_CACHE_CAPACITY: usize = 1000;
+    const DEFAULT_PLAN_CACHE_CAPACITY: usize = 500;
+
     /// Create a new lazy context with an empty graph.
     pub fn new() -> Self {
+        Self::with_cache_sizes(
+            Self::DEFAULT_KERNEL_CACHE_CAPACITY,
+            Self::DEFAULT_PLAN_CACHE_CAPACITY,
+        )
+    }
+
+    pub fn with_cache_sizes(kernel_cache_capacity: usize, plan_cache_capacity: usize) -> Self {
         Self {
             graph: Arc::new(Mutex::new(Graph::new())),
-            kernel_cache: Arc::new(Mutex::new(HashMap::new())),
-            plan_cache: Arc::new(Mutex::new(HashMap::new())),
+            kernel_cache: Arc::new(Mutex::new(LruCache::new(kernel_cache_capacity))),
+            plan_cache: Arc::new(Mutex::new(LruCache::new(plan_cache_capacity))),
             buffer_pool: Arc::new(Mutex::new(BufferPool::new())),
-            backend: Arc::new(CpuBackend::default()),
+            backend: Arc::new(CpuBackend),
         }
     }
 
@@ -54,8 +64,10 @@ impl Context {
     pub fn with_backend(backend: Arc<dyn Backend>) -> Self {
         Self {
             graph: Arc::new(Mutex::new(Graph::new())),
-            kernel_cache: Arc::new(Mutex::new(HashMap::new())),
-            plan_cache: Arc::new(Mutex::new(HashMap::new())),
+            kernel_cache: Arc::new(Mutex::new(LruCache::new(
+                Self::DEFAULT_KERNEL_CACHE_CAPACITY,
+            ))),
+            plan_cache: Arc::new(Mutex::new(LruCache::new(Self::DEFAULT_PLAN_CACHE_CAPACITY))),
             buffer_pool: Arc::new(Mutex::new(BufferPool::new())),
             backend,
         }

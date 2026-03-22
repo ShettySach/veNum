@@ -32,7 +32,7 @@ pub trait Backend: Send + Sync {
 }
 
 /// Default CPU backend using Cranelift.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct CpuBackend;
 
 impl Backend for CpuBackend {

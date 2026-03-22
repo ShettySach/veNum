@@ -3,7 +3,6 @@ use std::hash::{Hash, Hasher};
 use super::super::graph::{Graph, NodeId, Op};
 use super::super::schedule::FusedKernel;
 use super::super::shape_tracker::ShapeTracker;
-use super::index_map::{build_input_index_map, id_to_index};
 
 // -------- kernel signature (structural identity for caching) --------
 
@@ -36,8 +35,7 @@ impl KernelSignature {
             0u8.hash(&mut hasher);
         }
 
-        // Build input_index the same way compile_kernel does.
-        let input_index = build_input_index_map(graph.nodes.len(), &kernel.input_buffers);
+        let input_index = &kernel.input_index_map;
 
         // Hash the expression tree structure (from expr_root, not root).
         hash_expr(
@@ -71,22 +69,22 @@ fn hash_expr(
         Op::Const(v) => v.hash(hasher),
         Op::Load => {
             // Leaf - hash its input index and any tracker.
-            let resolved = source_map[id_to_index(id)].unwrap_or(id);
-            if let Some(idx) = input_index[id_to_index(resolved)] {
+            let resolved = source_map[id.0].unwrap_or(id);
+            if let Some(idx) = input_index[resolved.0] {
                 0u8.hash(hasher); // tag: indexed input
                 idx.hash(hasher);
-                if let Some(tracker) = trackers[id_to_index(resolved)].as_ref() {
+                if let Some(tracker) = trackers[resolved.0].as_ref() {
                     hash_tracker(tracker, hasher);
                 }
             }
         }
         op if !op.is_elementwise() => {
             // Inlined shape op resolved to a source buffer.
-            let resolved = source_map[id_to_index(id)].unwrap_or(id);
-            if let Some(idx) = input_index[id_to_index(resolved)] {
+            let resolved = source_map[id.0].unwrap_or(id);
+            if let Some(idx) = input_index[resolved.0] {
                 1u8.hash(hasher); // tag: resolved shape op
                 idx.hash(hasher);
-                if let Some(tracker) = trackers[id_to_index(resolved)].as_ref() {
+                if let Some(tracker) = trackers[resolved.0].as_ref() {
                     hash_tracker(tracker, hasher);
                 }
             }

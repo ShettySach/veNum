@@ -20,21 +20,23 @@ impl Tensor {
     pub fn render_optimized_dag(&self) -> Result<String> {
         let graph_handle = self.cx.graph();
         let graph = graph_handle.lock().unwrap();
-        if !is_optimize_safe(&graph, self.id) {
-            return Ok(render::render_dag(&graph, self.id));
+        if is_optimize_safe(&graph, self.id) {
+            let (opt_graph, opt_root) = optimize::optimize(&graph, self.id)?;
+            Ok(render::render_dag(&opt_graph, opt_root))
+        } else {
+            Ok(render::render_dag(&graph, self.id))
         }
-        let (opt_graph, opt_root) = optimize::optimize(&graph, self.id)?;
-        Ok(render::render_dag(&opt_graph, opt_root))
     }
 
     pub fn render_optimized_fused_dag(&self) -> Result<String> {
         let graph_handle = self.cx.graph();
         let graph = graph_handle.lock().unwrap();
-        if !is_optimize_safe(&graph, self.id) {
-            return Ok(render::render_fused_dag(&graph, self.id));
+        if is_optimize_safe(&graph, self.id) {
+            let (opt_graph, opt_root) = optimize::optimize(&graph, self.id)?;
+            Ok(render::render_fused_dag(&opt_graph, opt_root))
+        } else {
+            Ok(render::render_fused_dag(&graph, self.id))
         }
-        let (opt_graph, opt_root) = optimize::optimize(&graph, self.id)?;
-        Ok(render::render_fused_dag(&opt_graph, opt_root))
     }
 
     pub fn render_kernels(&self) -> Result<String> {

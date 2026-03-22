@@ -8,6 +8,14 @@ use super::fused_kernel::{
 };
 use super::schedule_item::ScheduleItem;
 
+fn build_input_index_map(graph_nodes_len: usize, input_buffers: &[NodeId]) -> Vec<Option<usize>> {
+    let mut map = vec![None; graph_nodes_len];
+    for (i, &buf_id) in input_buffers.iter().enumerate() {
+        map[buf_id.0] = Some(i);
+    }
+    map
+}
+
 /// Build a linear execution schedule from the graph, rooted at `root`.
 pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
     let topo = topo_sort(graph, root);
@@ -58,7 +66,6 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
                     let mut input_buffers = Vec::new();
                     let mut input_trackers = vec![None; graph.nodes.len()];
                     let mut shape_source_map = vec![None; graph.nodes.len()];
-                    let mut num_tracked_inputs = 0usize;
                     let mut num_absorbed_shape_ops = 0usize;
 
                     if matches!(expr_node.op, Op::Load | Op::Const(_)) {
@@ -82,9 +89,6 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
                             if !input_buffers.contains(&source) {
                                 input_buffers.push(source);
                             }
-                            if input_trackers[source.0].is_none() {
-                                num_tracked_inputs += 1;
-                            }
                             input_trackers[source.0] = Some(tracker);
                         } else {
                             // Can't absorb shape ops — fall through to interpreted.
@@ -107,7 +111,6 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
                             &mut input_buffers,
                             &mut input_trackers,
                             &mut shape_source_map,
-                            &mut num_tracked_inputs,
                             &mut num_absorbed_shape_ops,
                             &iter_shape,
                         );
@@ -121,6 +124,7 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
                         _ => true,
                     });
 
+                    let input_index_map = build_input_index_map(graph.nodes.len(), &input_buffers);
                     schedule.push(ScheduleItem::Fused(FusedKernel {
                         root: id,
                         expr_root: expr_input,
@@ -128,9 +132,13 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
                         numel: node.numel(),
                         output_shape: node.shape.clone(),
                         iter_shape,
+                        has_noncontiguous_trackers: input_trackers
+                            .iter()
+                            .filter_map(|t| t.as_ref())
+                            .any(|t| !t.is_contiguous()),
+                        input_index_map,
                         input_trackers,
                         shape_source_map,
-                        num_tracked_inputs,
                         num_absorbed_shape_ops,
                         reduce: Some(reduce_spec),
                     }));
@@ -154,7 +162,6 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
             let mut input_buffers = Vec::new();
             let mut input_trackers = vec![None; graph.nodes.len()];
             let mut shape_source_map = vec![None; graph.nodes.len()];
-            let mut num_tracked_inputs = 0usize;
             let mut num_absorbed_shape_ops = 0usize;
             let output_shape = node.shape.clone();
 
@@ -166,7 +173,6 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
                 &mut input_buffers,
                 &mut input_trackers,
                 &mut shape_source_map,
-                &mut num_tracked_inputs,
                 &mut num_absorbed_shape_ops,
                 &output_shape,
             );
@@ -178,6 +184,7 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
                 _ => true,
             });
 
+            let input_index_map = build_input_index_map(graph.nodes.len(), &input_buffers);
             schedule.push(ScheduleItem::Fused(FusedKernel {
                 root: id,
                 expr_root: id,
@@ -185,9 +192,13 @@ pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
                 numel: node.numel(),
                 output_shape: output_shape.clone(),
                 iter_shape: output_shape,
+                has_noncontiguous_trackers: input_trackers
+                    .iter()
+                    .filter_map(|t| t.as_ref())
+                    .any(|t| !t.is_contiguous()),
+                input_index_map,
                 input_trackers,
                 shape_source_map,
-                num_tracked_inputs,
                 num_absorbed_shape_ops,
                 reduce: None,
             }));

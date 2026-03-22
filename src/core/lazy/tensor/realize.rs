@@ -1,18 +1,22 @@
 use anyhow::{anyhow, bail, Result};
 use std::sync::Arc;
 
-use super::super::backend::Backend;
-use super::super::context::SharedBufferPool;
-use super::super::dtype::{Buffer, RealizedTensor};
-use super::super::exec;
-use super::super::graph::{Graph, NodeId, Op};
-use super::super::jit::KernelSignature;
-use super::super::kernel::ExecutableKernel;
-use super::super::optimize;
-use super::super::plan::{ExecItem, ExecutionPlan, GraphSignature};
-use super::super::schedule::{build_schedule, ScheduleItem};
-use super::helpers::{clone_reachable_subgraph, is_optimize_safe};
-use super::Tensor;
+use crate::core::lazy::{
+    backend::Backend,
+    context::SharedBufferPool,
+    dtype::{Buffer, RealizedTensor},
+    exec,
+    graph::{Graph, NodeId, Op},
+    jit::KernelSignature,
+    kernel::ExecutableKernel,
+    optimize,
+    plan::{ExecItem, ExecutionPlan, GraphSignature},
+    schedule::{build_schedule, ScheduleItem},
+    tensor::{
+        helpers::{clone_reachable_subgraph, is_optimize_safe},
+        Tensor,
+    },
+};
 
 impl Tensor {
     pub fn realize(&self) -> Result<RealizedTensor> {
@@ -31,10 +35,8 @@ impl Tensor {
         // Check the plan cache.
         {
             let plan_cache_handle = self.cx.plan_cache();
-            let cache = plan_cache_handle.lock().unwrap();
-            if let Some(plan) = cache.get(&sig) {
-                let plan = Arc::clone(plan);
-                drop(cache);
+            let mut cache = plan_cache_handle.lock().unwrap();
+            if let Some(plan) = cache.get_cloned(&sig) {
                 drop(graph);
                 return run_plan(&plan, &self.cx.buffer_pool());
             }
@@ -75,7 +77,7 @@ fn build_plan(
     exec_graph: Graph,
     root: NodeId,
     kernel_cache: &std::sync::Mutex<
-        std::collections::HashMap<KernelSignature, Arc<dyn ExecutableKernel>>,
+        crate::core::lazy::lru_cache::LruCache<KernelSignature, Arc<dyn ExecutableKernel>>,
     >,
     backend: &dyn Backend,
     tensor_shape: &[usize],
@@ -118,8 +120,8 @@ fn build_plan(
                 let sig = KernelSignature::from_kernel(&exec_graph, kernel);
                 let compiled = {
                     let mut cache = kernel_cache.lock().unwrap();
-                    if let Some(cached) = cache.get(&sig) {
-                        Arc::clone(cached)
+                    if let Some(cached) = cache.get_cloned(&sig) {
+                        cached
                     } else {
                         let compiled = backend.compile(&exec_graph, kernel, false)?;
                         cache.insert(sig, Arc::clone(&compiled));
@@ -160,9 +162,9 @@ fn build_plan(
     })
 }
 
-/// Compute the last step index at which each intermediate NodeId is read.
-fn compute_last_use(plan: &ExecutionPlan) -> std::collections::HashMap<NodeId, usize> {
-    let mut last_use = std::collections::HashMap::new();
+/// Precompute which intermediates can be released at each plan step.
+fn compute_release_lists(plan: &ExecutionPlan) -> Vec<Vec<NodeId>> {
+    let mut last_use: std::collections::HashMap<NodeId, usize> = std::collections::HashMap::new();
     for (step, item) in plan.items.iter().enumerate() {
         match item {
             ExecItem::Kernel { inputs, .. } => {
@@ -176,7 +178,14 @@ fn compute_last_use(plan: &ExecutionPlan) -> std::collections::HashMap<NodeId, u
             ExecItem::ConstFill { .. } => {}
         }
     }
-    last_use
+
+    let mut release_at = vec![Vec::new(); plan.items.len()];
+    for (node_id, step) in last_use {
+        if node_id != plan.output {
+            release_at[step].push(node_id);
+        }
+    }
+    release_at
 }
 
 /// Execute a cached plan to produce a realized tensor.
@@ -195,7 +204,7 @@ fn run_plan(plan: &ExecutionPlan, pool: &SharedBufferPool) -> Result<RealizedTen
         bail!("Empty plan with no output buffer available");
     }
 
-    let last_use = compute_last_use(plan);
+    let release_at = compute_release_lists(plan);
 
     let mut realized: std::collections::HashMap<NodeId, Buffer> = std::collections::HashMap::new();
 
@@ -255,19 +264,9 @@ fn run_plan(plan: &ExecutionPlan, pool: &SharedBufferPool) -> Result<RealizedTen
             }
         }
 
-        // Release dead intermediates back to the pool.
-        // Only release intermediates that are not the final output.
-        for (&node_id, &last_step) in &last_use {
-            if last_step == step && node_id != plan.output {
-                if let Some(buf) = realized.remove(&node_id) {
-                    let dtype = buf.dtype();
-                    let numel = buf.len();
-                    // We can't recover the raw Vec<u8> from a Buffer, so just drop it.
-                    // The pool is used for kernel output allocations above.
-                    drop(buf);
-                    let _ = (dtype, numel);
-                }
-            }
+        // Drop dead intermediates.
+        for &node_id in &release_at[step] {
+            let _ = realized.remove(&node_id);
         }
     }
 

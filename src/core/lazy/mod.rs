@@ -5,6 +5,7 @@ mod exec;
 mod graph;
 mod jit;
 mod kernel;
+mod lru_cache;
 mod optimize;
 mod plan;
 mod render;

@@ -1,6 +1,6 @@
 use anyhow::{bail, Result};
 
-use super::super::dtype::{Buffer, Scalar};
+use super::super::dtype::Buffer;
 use super::super::graph::Op;
 use crate::core::iters::Indexer;
 
@@ -10,6 +10,52 @@ pub(crate) fn execute_shape_op_typed(
     input_shape: &[usize],
     output_shape: &[usize],
 ) -> Result<Buffer> {
+    // Handle Pad here to avoid unsafe generic scalar casting.
+    if let Op::Pad(constant, padding) = op {
+        return match input_buf {
+            Buffer::F32(v) => {
+                let fill = constant.to_f64() as f32;
+                Ok(Buffer::from_f32_vec(execute_pad(
+                    v,
+                    input_shape,
+                    output_shape,
+                    fill,
+                    padding,
+                )?))
+            }
+            Buffer::F64(v) => {
+                let fill = constant.to_f64();
+                Ok(Buffer::from_f64_vec(execute_pad(
+                    v,
+                    input_shape,
+                    output_shape,
+                    fill,
+                    padding,
+                )?))
+            }
+            Buffer::I32(v) => {
+                let fill = constant.to_f64() as i32;
+                Ok(Buffer::from_i32_vec(execute_pad(
+                    v,
+                    input_shape,
+                    output_shape,
+                    fill,
+                    padding,
+                )?))
+            }
+            Buffer::I64(v) => {
+                let fill = constant.to_f64() as i64;
+                Ok(Buffer::from_i64_vec(execute_pad(
+                    v,
+                    input_shape,
+                    output_shape,
+                    fill,
+                    padding,
+                )?))
+            }
+        };
+    }
+
     match input_buf {
         Buffer::F32(v) => Ok(Buffer::from_f32_vec(execute_shape_op(
             op,
@@ -53,29 +99,8 @@ fn execute_shape_op<T: Copy + Default>(
         Op::Flip(flips) => execute_flip(input_data, input_shape, output_shape, flips),
         Op::Squeeze => execute_reshape(input_data, input_shape, output_shape),
         Op::Unsqueeze(_) => execute_reshape(input_data, input_shape, output_shape),
-        Op::Pad(constant, padding) => {
-            let fill = scalar_to_typed::<T>(*constant);
-            execute_pad(input_data, input_shape, output_shape, fill, padding)
-        }
+        Op::Pad(_, _) => bail!("execute_shape_op Pad should be handled typed"),
         _ => bail!("execute_shape_op called with non-shape op: {:?}", op),
-    }
-}
-
-fn scalar_to_typed<T: Copy + Default>(s: Scalar) -> T {
-    // Safety: we know the Scalar variant matches the Buffer variant that called us.
-    // Use byte reinterpretation to avoid needing trait bounds for From.
-    unsafe {
-        let mut val = T::default();
-        let src = match s {
-            Scalar::F32(v) => std::slice::from_raw_parts(&v as *const f32 as *const u8, 4),
-            Scalar::F64(v) => std::slice::from_raw_parts(&v as *const f64 as *const u8, 8),
-            Scalar::I32(v) => std::slice::from_raw_parts(&v as *const i32 as *const u8, 4),
-            Scalar::I64(v) => std::slice::from_raw_parts(&v as *const i64 as *const u8, 8),
-        };
-        let dst =
-            std::slice::from_raw_parts_mut(&mut val as *mut T as *mut u8, std::mem::size_of::<T>());
-        dst.copy_from_slice(src);
-        val
     }
 }
 
