@@ -7,7 +7,7 @@ __   _____  /\ \ \_   _ _ __ ___
   \_/ \___\_\ \/  \__,_|_| |_| |_|
 ```
 
-Vectorized _N_-dimensional numerical arrays.
+Vectorized _N_-dimensional numericals
 */
 
 mod core;
