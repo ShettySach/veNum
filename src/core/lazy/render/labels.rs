@@ -35,11 +35,7 @@ pub(super) fn node_label(graph: &Graph, id: NodeId) -> String {
     match &node.op {
         Op::Const(v) => format!("Const({v:?})\\n{shape_str}"),
         Op::Load => {
-            let preview = node
-                .buffer
-                .as_ref()
-                .map(|b| buffer_preview(b))
-                .unwrap_or_default();
+            let preview = node.buffer.as_ref().map(buffer_preview).unwrap_or_default();
             format!("Load {:?}\\n{preview}\\n{shape_str}", node.dtype)
         }
         other => format!("{}\\n{shape_str}", op_label(other)),
@@ -48,10 +44,10 @@ pub(super) fn node_label(graph: &Graph, id: NodeId) -> String {
 
 fn buffer_preview(buffer: &Buffer) -> String {
     match buffer {
-        Buffer::F32(v) => fmt_preview_slice(&**v),
-        Buffer::F64(v) => fmt_preview_slice(&**v),
-        Buffer::I32(v) => fmt_preview_slice(&**v),
-        Buffer::I64(v) => fmt_preview_slice(&**v),
+        Buffer::F32(v) => fmt_preview_slice(v),
+        Buffer::F64(v) => fmt_preview_slice(v),
+        Buffer::I32(v) => fmt_preview_slice(v),
+        Buffer::I64(v) => fmt_preview_slice(v),
     }
 }
 

@@ -4,6 +4,14 @@ use std::collections::HashMap;
 use crate::core::lazy::dtype::{DType, Scalar};
 use crate::core::lazy::graph::{Graph, Node, NodeId, Op};
 
+struct ParseContext<'a> {
+    original: &'a Graph,
+    termdag: &'a egglog::TermDag,
+    shape_table: &'a [Vec<usize>],
+    perm_table: &'a [Vec<usize>],
+    memo: &'a mut HashMap<egglog::TermId, NodeId>,
+}
+
 /// Parse an egglog extracted term back into a Graph.
 /// Reuses Load buffers from the original graph.
 /// Uses memoization to ensure identical subterms map to the same NodeId.
@@ -17,32 +25,26 @@ pub(super) fn parse_extracted_term(
 ) -> Result<(Graph, NodeId)> {
     let mut graph = Graph::new();
     let mut memo: HashMap<egglog::TermId, NodeId> = HashMap::new();
+    let mut context = ParseContext {
+        original,
+        termdag,
+        shape_table,
+        perm_table,
+        memo: &mut memo,
+    };
 
     // The term returned by ExtractBest is already the root
     // We'll parse it and track TermIds for all subterms
-    let root = parse_term_direct(
-        original,
-        termdag,
-        term,
-        &mut graph,
-        root_dtype,
-        shape_table,
-        perm_table,
-        &mut memo,
-    )?;
+    let root = parse_term_direct(&mut context, term, &mut graph, root_dtype)?;
     Ok((graph, root))
 }
 
 /// Helper to parse a Term when we don't have its TermId yet
 fn parse_term_direct(
-    original: &Graph,
-    termdag: &egglog::TermDag,
+    context: &mut ParseContext<'_>,
     term: &egglog::Term,
     graph: &mut Graph,
     dtype: DType,
-    shape_table: &[Vec<usize>],
-    perm_table: &[Vec<usize>],
-    memo: &mut HashMap<egglog::TermId, NodeId>,
 ) -> Result<NodeId> {
     // For the root term, we don't have a TermId to check in memo
     // But for all child terms (via TermIds in args), we'll use memoization
@@ -51,16 +53,7 @@ fn parse_term_direct(
             // For children, we have TermIds and can memoize
             // Parse using the TermId-based function
             // Since all children are TermIds, we can delegate to parse_term
-            parse_term_from_app(
-                original,
-                termdag,
-                term,
-                graph,
-                dtype,
-                shape_table,
-                perm_table,
-                memo,
-            )
+            parse_term_from_app(context, term, graph, dtype)
         }
         egglog::Term::Lit(_) | egglog::Term::Var(_) => {
             bail!("Unexpected leaf term in extracted output")
@@ -69,46 +62,29 @@ fn parse_term_direct(
 }
 
 fn parse_term(
-    original: &Graph,
-    termdag: &egglog::TermDag,
+    context: &mut ParseContext<'_>,
     term_id: egglog::TermId,
     graph: &mut Graph,
     dtype: DType,
-    shape_table: &[Vec<usize>],
-    perm_table: &[Vec<usize>],
-    memo: &mut HashMap<egglog::TermId, NodeId>,
 ) -> Result<NodeId> {
     // Check memo first - if we've already parsed this TermId, reuse the NodeId
-    if let Some(&node_id) = memo.get(&term_id) {
+    if let Some(&node_id) = context.memo.get(&term_id) {
         return Ok(node_id);
     }
 
-    let term = termdag.get(term_id);
-    let node_id = parse_term_from_app(
-        original,
-        termdag,
-        term,
-        graph,
-        dtype,
-        shape_table,
-        perm_table,
-        memo,
-    )?;
+    let term = context.termdag.get(term_id).clone();
+    let node_id = parse_term_from_app(context, &term, graph, dtype)?;
 
     // Store in memo before returning
-    memo.insert(term_id, node_id);
+    context.memo.insert(term_id, node_id);
     Ok(node_id)
 }
 
 fn parse_term_from_app(
-    original: &Graph,
-    termdag: &egglog::TermDag,
+    context: &mut ParseContext<'_>,
     term: &egglog::Term,
     graph: &mut Graph,
     dtype: DType,
-    shape_table: &[Vec<usize>],
-    perm_table: &[Vec<usize>],
-    memo: &mut HashMap<egglog::TermId, NodeId>,
 ) -> Result<NodeId> {
     fn parse_idx(termdag: &egglog::TermDag, tid: egglog::TermId, what: &str) -> Result<usize> {
         let egglog::Term::Lit(egglog::ast::Literal::Int(raw)) = termdag.get(tid) else {
@@ -121,11 +97,13 @@ fn parse_term_from_app(
         egglog::Term::App(head, args) => {
             let node_id = match (head.as_str(), args.as_slice()) {
                 ("tLoad", [id]) => {
-                    let egglog::Term::Lit(egglog::ast::Literal::Int(raw)) = termdag.get(*id) else {
+                    let egglog::Term::Lit(egglog::ast::Literal::Int(raw)) =
+                        context.termdag.get(*id)
+                    else {
                         bail!("tLoad expects int literal id");
                     };
                     let id = usize::try_from(*raw).context("tLoad id out of range")?;
-                    let orig_node = original.node(NodeId(id));
+                    let orig_node = context.original.node(NodeId(id));
                     graph.add_node(Node {
                         op: Op::Load,
                         inputs: vec![],
@@ -135,7 +113,8 @@ fn parse_term_from_app(
                     })
                 }
                 ("tConst", [val]) => {
-                    let egglog::Term::Lit(egglog::ast::Literal::Float(raw)) = termdag.get(*val)
+                    let egglog::Term::Lit(egglog::ast::Literal::Float(raw)) =
+                        context.termdag.get(*val)
                     else {
                         bail!("tConst expects float literal");
                     };
@@ -149,26 +128,8 @@ fn parse_term_from_app(
                     })
                 }
                 ("tAdd", [a, b]) | ("tSub", [a, b]) | ("tMul", [a, b]) | ("tDiv", [a, b]) => {
-                    let lhs = parse_term(
-                        original,
-                        termdag,
-                        *a,
-                        graph,
-                        dtype,
-                        shape_table,
-                        perm_table,
-                        memo,
-                    )?;
-                    let rhs = parse_term(
-                        original,
-                        termdag,
-                        *b,
-                        graph,
-                        dtype,
-                        shape_table,
-                        perm_table,
-                        memo,
-                    )?;
+                    let lhs = parse_term(context, *a, graph, dtype)?;
+                    let rhs = parse_term(context, *b, graph, dtype)?;
                     let op = match head.as_str() {
                         "tAdd" => Op::Add,
                         "tSub" => Op::Sub,
@@ -186,16 +147,7 @@ fn parse_term_from_app(
                     })
                 }
                 ("tExp", [a]) | ("tLn", [a]) | ("tSqrt", [a]) | ("tNeg", [a]) => {
-                    let arg = parse_term(
-                        original,
-                        termdag,
-                        *a,
-                        graph,
-                        dtype,
-                        shape_table,
-                        perm_table,
-                        memo,
-                    )?;
+                    let arg = parse_term(context, *a, graph, dtype)?;
                     let op = match head.as_str() {
                         "tExp" => Op::Exp,
                         "tLn" => Op::Ln,
@@ -213,18 +165,10 @@ fn parse_term_from_app(
                     })
                 }
                 ("tReshape", [a, sid]) => {
-                    let arg = parse_term(
-                        original,
-                        termdag,
-                        *a,
-                        graph,
-                        dtype,
-                        shape_table,
-                        perm_table,
-                        memo,
-                    )?;
-                    let shape_idx = parse_idx(termdag, *sid, "tReshape")?;
-                    let shape = shape_table
+                    let arg = parse_term(context, *a, graph, dtype)?;
+                    let shape_idx = parse_idx(context.termdag, *sid, "tReshape")?;
+                    let shape = context
+                        .shape_table
                         .get(shape_idx)
                         .cloned()
                         .context("tReshape shape id out of range")?;
@@ -237,18 +181,10 @@ fn parse_term_from_app(
                     })
                 }
                 ("tPermute", [a, pid]) => {
-                    let arg = parse_term(
-                        original,
-                        termdag,
-                        *a,
-                        graph,
-                        dtype,
-                        shape_table,
-                        perm_table,
-                        memo,
-                    )?;
-                    let perm_idx = parse_idx(termdag, *pid, "tPermute")?;
-                    let perm = perm_table
+                    let arg = parse_term(context, *a, graph, dtype)?;
+                    let perm_idx = parse_idx(context.termdag, *pid, "tPermute")?;
+                    let perm = context
+                        .perm_table
                         .get(perm_idx)
                         .cloned()
                         .context("tPermute permutation id out of range")?;
@@ -263,18 +199,9 @@ fn parse_term_from_app(
                     })
                 }
                 ("tTranspose", [a, d1, d2]) => {
-                    let arg = parse_term(
-                        original,
-                        termdag,
-                        *a,
-                        graph,
-                        dtype,
-                        shape_table,
-                        perm_table,
-                        memo,
-                    )?;
-                    let dim_1 = parse_idx(termdag, *d1, "tTranspose")?;
-                    let dim_2 = parse_idx(termdag, *d2, "tTranspose")?;
+                    let arg = parse_term(context, *a, graph, dtype)?;
+                    let dim_1 = parse_idx(context.termdag, *d1, "tTranspose")?;
+                    let dim_2 = parse_idx(context.termdag, *d2, "tTranspose")?;
                     let mut shape = graph.node(arg).shape.clone();
                     shape.swap(dim_1, dim_2);
                     graph.add_node(Node {
@@ -286,18 +213,10 @@ fn parse_term_from_app(
                     })
                 }
                 ("tExpand", [a, sid]) => {
-                    let arg = parse_term(
-                        original,
-                        termdag,
-                        *a,
-                        graph,
-                        dtype,
-                        shape_table,
-                        perm_table,
-                        memo,
-                    )?;
-                    let shape_idx = parse_idx(termdag, *sid, "tExpand")?;
-                    let shape = shape_table
+                    let arg = parse_term(context, *a, graph, dtype)?;
+                    let shape_idx = parse_idx(context.termdag, *sid, "tExpand")?;
+                    let shape = context
+                        .shape_table
                         .get(shape_idx)
                         .cloned()
                         .context("tExpand shape id out of range")?;
@@ -310,16 +229,7 @@ fn parse_term_from_app(
                     })
                 }
                 ("tSqueeze", [a]) => {
-                    let arg = parse_term(
-                        original,
-                        termdag,
-                        *a,
-                        graph,
-                        dtype,
-                        shape_table,
-                        perm_table,
-                        memo,
-                    )?;
+                    let arg = parse_term(context, *a, graph, dtype)?;
                     let mut shape: Vec<usize> = graph
                         .node(arg)
                         .shape
@@ -339,17 +249,8 @@ fn parse_term_from_app(
                     })
                 }
                 ("tUnsqueeze", [a, rank]) => {
-                    let arg = parse_term(
-                        original,
-                        termdag,
-                        *a,
-                        graph,
-                        dtype,
-                        shape_table,
-                        perm_table,
-                        memo,
-                    )?;
-                    let new_rank = parse_idx(termdag, *rank, "tUnsqueeze")?;
+                    let arg = parse_term(context, *a, graph, dtype)?;
+                    let new_rank = parse_idx(context.termdag, *rank, "tUnsqueeze")?;
                     let in_shape = graph.node(arg).shape.clone();
                     if new_rank < in_shape.len() {
                         bail!(

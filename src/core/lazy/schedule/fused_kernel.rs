@@ -72,14 +72,18 @@ pub struct ReduceOpItem {
     pub shape: Vec<usize>,
 }
 
+pub(super) struct KernelInputCollector<'a> {
+    pub consumer_counts: &'a HashMap<NodeId, usize>,
+    pub inlined: &'a mut HashSet<NodeId>,
+    pub inputs: &'a mut Vec<NodeId>,
+    pub trackers: &'a mut HashMap<NodeId, ShapeTracker>,
+    pub source_map: &'a mut HashMap<NodeId, NodeId>,
+}
+
 pub(super) fn collect_kernel_inputs(
     graph: &Graph,
     id: NodeId,
-    consumer_counts: &HashMap<NodeId, usize>,
-    inlined: &mut HashSet<NodeId>,
-    inputs: &mut Vec<NodeId>,
-    trackers: &mut HashMap<NodeId, ShapeTracker>,
-    source_map: &mut HashMap<NodeId, NodeId>,
+    collector: &mut KernelInputCollector<'_>,
     output_shape: &[usize],
 ) {
     let node = graph.node(id);
@@ -89,19 +93,19 @@ pub(super) fn collect_kernel_inputs(
 
         // Const nodes are always inlined (they emit consts in JIT).
         if matches!(input_node.op, Op::Const(_)) {
-            inlined.insert(input_id);
+            collector.inlined.insert(input_id);
             continue;
         }
 
         // Try to absorb a shape op chain.
         if input_node.op.is_shape_op() {
             if let Some((source, tracker, chain)) =
-                try_build_tracker(graph, input_id, consumer_counts, output_shape)
+                try_build_tracker(graph, input_id, collector.consumer_counts, output_shape)
             {
                 // Mark all shape ops in the chain as inlined and record source mapping.
                 for &shape_id in &chain {
-                    inlined.insert(shape_id);
-                    source_map.insert(shape_id, source);
+                    collector.inlined.insert(shape_id);
+                    collector.source_map.insert(shape_id, source);
                 }
 
                 // If the tracker is contiguous, the source's elements map 1:1
@@ -111,52 +115,34 @@ pub(super) fn collect_kernel_inputs(
                 let source_node = graph.node(source);
                 let can_inline_source = tracker.is_contiguous()
                     && source_node.op.is_elementwise()
-                    && *consumer_counts.get(&source).unwrap_or(&0) == 1
+                    && *collector.consumer_counts.get(&source).unwrap_or(&0) == 1
                     && source_node.numel() == node.numel();
 
                 if can_inline_source {
-                    inlined.insert(source);
-                    collect_kernel_inputs(
-                        graph,
-                        source,
-                        consumer_counts,
-                        inlined,
-                        inputs,
-                        trackers,
-                        source_map,
-                        output_shape,
-                    );
+                    collector.inlined.insert(source);
+                    collect_kernel_inputs(graph, source, collector, output_shape);
                 } else {
                     // The source becomes a kernel input with a tracker.
-                    if !inputs.contains(&source) {
-                        inputs.push(source);
+                    if !collector.inputs.contains(&source) {
+                        collector.inputs.push(source);
                     }
-                    trackers.insert(source, tracker);
+                    collector.trackers.insert(source, tracker);
                 }
                 continue;
             }
         }
 
         let can_inline = input_node.op.is_elementwise()
-            && *consumer_counts.get(&input_id).unwrap_or(&0) == 1
+            && *collector.consumer_counts.get(&input_id).unwrap_or(&0) == 1
             && input_node.numel() == node.numel();
 
         if can_inline {
-            inlined.insert(input_id);
-            collect_kernel_inputs(
-                graph,
-                input_id,
-                consumer_counts,
-                inlined,
-                inputs,
-                trackers,
-                source_map,
-                output_shape,
-            );
+            collector.inlined.insert(input_id);
+            collect_kernel_inputs(graph, input_id, collector, output_shape);
         } else {
             // This is a barrier leaf input for the fused kernel.
-            if !inputs.contains(&input_id) {
-                inputs.push(input_id);
+            if !collector.inputs.contains(&input_id) {
+                collector.inputs.push(input_id);
             }
         }
     }

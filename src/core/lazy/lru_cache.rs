@@ -5,9 +5,10 @@ pub struct LruCache<K, V>
 where
     K: Eq + Hash + Clone,
 {
-    map: HashMap<K, V>,
-    order: VecDeque<K>,
+    map: HashMap<K, (V, u64)>,
+    order: VecDeque<(K, u64)>,
     capacity: usize,
+    next_gen: u64,
 }
 
 impl<K, V> LruCache<K, V>
@@ -19,6 +20,7 @@ where
             map: HashMap::new(),
             order: VecDeque::new(),
             capacity,
+            next_gen: 0,
         }
     }
 
@@ -28,7 +30,7 @@ where
     {
         if self.map.contains_key(key) {
             self.touch(key);
-            self.map.get(key).cloned()
+            self.map.get(key).map(|(value, _)| value.clone())
         } else {
             None
         }
@@ -39,28 +41,61 @@ where
             return;
         }
 
-        if self.map.contains_key(&key) {
-            self.map.insert(key.clone(), value);
+        if let Some((existing, _)) = self.map.get_mut(&key) {
+            *existing = value;
             self.touch(&key);
             return;
         }
 
         if self.map.len() >= self.capacity {
-            while let Some(oldest) = self.order.pop_front() {
-                if self.map.remove(&oldest).is_some() {
-                    break;
-                }
-            }
+            self.evict_lru();
         }
 
-        self.order.push_back(key.clone());
-        self.map.insert(key, value);
+        let generation = self.bump_generation();
+        self.order.push_back((key.clone(), generation));
+        self.map.insert(key, (value, generation));
+        self.maybe_compact_order();
     }
 
     fn touch(&mut self, key: &K) {
-        if let Some(pos) = self.order.iter().position(|k| k == key) {
-            let _ = self.order.remove(pos);
+        if self.map.contains_key(key) {
+            let generation = self.bump_generation();
+            if let Some((_, current_generation)) = self.map.get_mut(key) {
+                *current_generation = generation;
+            }
+            self.order.push_back((key.clone(), generation));
+            self.maybe_compact_order();
         }
-        self.order.push_back(key.clone());
+    }
+
+    fn evict_lru(&mut self) {
+        while let Some((oldest_key, oldest_generation)) = self.order.pop_front() {
+            let should_evict = self
+                .map
+                .get(&oldest_key)
+                .is_some_and(|(_, current_generation)| *current_generation == oldest_generation);
+            if should_evict {
+                self.map.remove(&oldest_key);
+                break;
+            }
+        }
+    }
+
+    fn bump_generation(&mut self) -> u64 {
+        let generation = self.next_gen;
+        self.next_gen = self.next_gen.wrapping_add(1);
+        generation
+    }
+
+    fn maybe_compact_order(&mut self) {
+        let threshold = self.capacity.saturating_mul(4);
+        if self.order.len() <= threshold {
+            return;
+        }
+        self.order.retain(|(key, generation)| {
+            self.map
+                .get(key)
+                .is_some_and(|(_, current_generation)| current_generation == generation)
+        });
     }
 }

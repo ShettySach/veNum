@@ -4,8 +4,8 @@ use crate::core::lazy::graph::{Graph, NodeId, Op};
 use crate::core::lazy::shape_tracker::ShapeTracker;
 
 use crate::core::lazy::schedule::fused_kernel::{
-    collect_kernel_inputs, try_build_tracker, FusedKernel, ReduceKind, ReduceOpItem, ReduceSpec,
-    ShapeOpItem,
+    collect_kernel_inputs, try_build_tracker, FusedKernel, KernelInputCollector, ReduceKind,
+    ReduceOpItem, ReduceSpec, ShapeOpItem,
 };
 use crate::core::lazy::schedule::schedule_item::ScheduleItem;
 
@@ -18,33 +18,28 @@ fn build_input_index_map(input_buffers: &[NodeId]) -> HashMap<NodeId, usize> {
 }
 
 fn find_single_consumer(
-    graph: &Graph,
+    consumers: &HashMap<NodeId, Vec<NodeId>>,
     producer: NodeId,
-    topo_set: &HashSet<NodeId>,
 ) -> Option<NodeId> {
-    for (idx, node) in graph.nodes.iter().enumerate() {
-        let nid = NodeId(idx);
-        if !topo_set.contains(&nid) {
-            continue;
-        }
-        if node.inputs.contains(&producer) {
-            return Some(nid);
-        }
+    let consumer_list = consumers.get(&producer)?;
+    if consumer_list.len() == 1 {
+        Some(consumer_list[0])
+    } else {
+        None
     }
-    None
 }
 
 fn build_output_tracker_chain(
     graph: &Graph,
     start: NodeId,
     consumer_counts: &HashMap<NodeId, usize>,
-    topo_set: &HashSet<NodeId>,
+    consumers: &HashMap<NodeId, Vec<NodeId>>,
 ) -> Option<(NodeId, ShapeTracker, Vec<NodeId>)> {
     let mut current = start;
     let mut chain = Vec::new();
 
     while *consumer_counts.get(&current).unwrap_or(&0) == 1 {
-        let Some(next) = find_single_consumer(graph, current, topo_set) else {
+        let Some(next) = find_single_consumer(consumers, current) else {
             break;
         };
         let next_node = graph.node(next);
@@ -109,8 +104,8 @@ struct ScheduleAnalysis {
 
 fn analyze_schedule(graph: &Graph, root: NodeId) -> ScheduleAnalysis {
     let topo = topo_sort(graph, root);
-    let topo_set: HashSet<NodeId> = topo.iter().copied().collect();
     let consumer_counts = compute_consumer_counts(graph, &topo);
+    let consumers = compute_consumers(graph, &topo);
 
     let mut inlined: HashSet<NodeId> = HashSet::new();
     let mut planned: Vec<Option<ScheduleItem>> = (0..graph.nodes.len()).map(|_| None).collect();
@@ -129,9 +124,9 @@ fn analyze_schedule(graph: &Graph, root: NodeId) -> ScheduleAnalysis {
         let plan = if node.op.is_shape_op() {
             analyze_shape_node(graph, id)
         } else if node.op.is_reduce_op() {
-            analyze_reduce_node(graph, id, &consumer_counts, &topo_set)
+            analyze_reduce_node(graph, id, &consumer_counts, &consumers)
         } else if node.op.is_elementwise() {
-            analyze_elementwise_node(graph, id, &consumer_counts, &topo_set)
+            analyze_elementwise_node(graph, id, &consumer_counts, &consumers)
         } else {
             continue;
         };
@@ -164,7 +159,7 @@ fn analyze_elementwise_node(
     graph: &Graph,
     id: NodeId,
     consumer_counts: &HashMap<NodeId, usize>,
-    topo_set: &HashSet<NodeId>,
+    consumers: &HashMap<NodeId, Vec<NodeId>>,
 ) -> NodePlan {
     let mut absorbed = HashSet::new();
     let mut input_buffers = Vec::new();
@@ -176,16 +171,18 @@ fn analyze_elementwise_node(
     collect_kernel_inputs(
         graph,
         id,
-        consumer_counts,
-        &mut absorbed,
-        &mut input_buffers,
-        &mut input_trackers,
-        &mut shape_source_map,
+        &mut KernelInputCollector {
+            consumer_counts,
+            inlined: &mut absorbed,
+            inputs: &mut input_buffers,
+            trackers: &mut input_trackers,
+            source_map: &mut shape_source_map,
+        },
         &output_shape,
     );
 
     let output_tracker = if let Some((final_root, tracker, chain)) =
-        build_output_tracker_chain(graph, id, consumer_counts, topo_set)
+        build_output_tracker_chain(graph, id, consumer_counts, consumers)
     {
         absorbed.extend(chain.iter().copied());
         kernel_root = final_root;
@@ -198,7 +195,7 @@ fn analyze_elementwise_node(
 
     NodePlan {
         absorbed,
-        item: ScheduleItem::Fused(FusedKernel {
+        item: ScheduleItem::Fused(Box::new(FusedKernel {
             root: kernel_root,
             expr_root: id,
             input_buffers,
@@ -211,7 +208,7 @@ fn analyze_elementwise_node(
             shape_source_map,
             output_tracker,
             reduce: None,
-        }),
+        })),
     }
 }
 
@@ -219,7 +216,7 @@ fn analyze_reduce_node(
     graph: &Graph,
     id: NodeId,
     consumer_counts: &HashMap<NodeId, usize>,
-    topo_set: &HashSet<NodeId>,
+    consumers: &HashMap<NodeId, Vec<NodeId>>,
 ) -> NodePlan {
     let node = graph.node(id);
     let expr_input = node.inputs[0];
@@ -231,7 +228,7 @@ fn analyze_reduce_node(
             expr_input,
             reduce_spec,
             consumer_counts,
-            topo_set,
+            consumers,
         ) {
             return plan;
         }
@@ -257,7 +254,7 @@ fn try_fused_reduce(
     expr_input: NodeId,
     reduce_spec: ReduceSpec,
     consumer_counts: &HashMap<NodeId, usize>,
-    topo_set: &HashSet<NodeId>,
+    consumers: &HashMap<NodeId, Vec<NodeId>>,
 ) -> Option<NodePlan> {
     let node = graph.node(id);
     let expr_node = graph.node(expr_input);
@@ -297,18 +294,20 @@ fn try_fused_reduce(
         collect_kernel_inputs(
             graph,
             expr_input,
-            consumer_counts,
-            &mut absorbed,
-            &mut input_buffers,
-            &mut input_trackers,
-            &mut shape_source_map,
+            &mut KernelInputCollector {
+                consumer_counts,
+                inlined: &mut absorbed,
+                inputs: &mut input_buffers,
+                trackers: &mut input_trackers,
+                source_map: &mut shape_source_map,
+            },
             &iter_shape,
         );
         absorbed.insert(expr_input);
     }
 
     let output_tracker = if let Some((final_root, tracker, chain)) =
-        build_output_tracker_chain(graph, id, consumer_counts, topo_set)
+        build_output_tracker_chain(graph, id, consumer_counts, consumers)
     {
         absorbed.extend(chain.iter().copied());
         kernel_root = final_root;
@@ -321,7 +320,7 @@ fn try_fused_reduce(
 
     Some(NodePlan {
         absorbed,
-        item: ScheduleItem::Fused(FusedKernel {
+        item: ScheduleItem::Fused(Box::new(FusedKernel {
             root: kernel_root,
             expr_root: expr_input,
             input_buffers,
@@ -334,7 +333,7 @@ fn try_fused_reduce(
             shape_source_map,
             output_tracker,
             reduce: Some(reduce_spec),
-        }),
+        })),
     })
 }
 
@@ -414,16 +413,25 @@ fn reduce_spec_from_op(op: &Op) -> Option<ReduceSpec> {
 /// Count how many times each node in `topo` is referenced as an input.
 fn compute_consumer_counts(graph: &Graph, topo: &[NodeId]) -> HashMap<NodeId, usize> {
     let mut counts: HashMap<NodeId, usize> = HashMap::new();
-    let topo_set: HashSet<NodeId> = topo.iter().copied().collect();
-
     for &id in topo {
         let node = graph.node(id);
         for &input_id in &node.inputs {
-            if topo_set.contains(&input_id) {
-                *counts.entry(input_id).or_insert(0) += 1;
-            }
+            *counts.entry(input_id).or_insert(0) += 1;
         }
     }
 
     counts
+}
+
+fn compute_consumers(graph: &Graph, topo: &[NodeId]) -> HashMap<NodeId, Vec<NodeId>> {
+    let mut consumers: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+
+    for &id in topo {
+        let node = graph.node(id);
+        for &input_id in &node.inputs {
+            consumers.entry(input_id).or_default().push(id);
+        }
+    }
+
+    consumers
 }
