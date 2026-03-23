@@ -2,7 +2,7 @@ mod backend;
 mod context;
 mod fusion_policy;
 mod jit;
-mod kernel;
+pub(crate) mod kernel;
 mod lru_cache;
 mod plan;
 mod render;

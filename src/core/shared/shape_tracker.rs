@@ -10,8 +10,8 @@ fn row_major_strides(shape: &[usize]) -> Vec<isize> {
         .iter()
         .rev()
         .scan(1, |acc, &s| {
-            let stride = acc;
-            acc *= s as isize;
+            let stride = *acc;
+            *acc *= s as isize;
             Some(stride)
         })
         .collect();

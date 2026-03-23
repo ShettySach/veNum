@@ -32,12 +32,19 @@
 //! let results = program.execute(&[&input_buffer])?;
 //! ```
 
+pub mod backend;
+pub mod compile;
 pub mod context;
 pub mod fusion_policy;
+pub mod pass;
 pub mod program;
 pub mod tensor;
+mod tests;
 
+pub use backend::{CpuSolidBackend, SolidBackend};
+pub use compile::compile;
 pub use context::SolidContext;
 pub use fusion_policy::SolidFusionPolicy;
+pub use pass::{FusionPass, GraphPass, MemoryPlanningPass, OptimizationPass, PassManager};
 pub use program::{CompiledProgram, StaticBufferPlan, TensorSpec};
 pub use tensor::Tensor;

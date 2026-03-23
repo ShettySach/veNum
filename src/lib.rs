@@ -16,6 +16,7 @@ pub use core::liquid::{Context, DType, RealizedTensor, Scalar, Tensor};
 pub use core::naive::ops::conv;
 pub use core::naive::NaiveTensor;
 pub use core::solid::{
-    CompiledProgram, SolidContext, SolidFusionPolicy, StaticBufferPlan, Tensor as SolidTensor,
-    TensorSpec,
+    compile as solid_compile, CompiledProgram, CpuSolidBackend, FusionPass, GraphPass,
+    MemoryPlanningPass, OptimizationPass, PassManager, SolidBackend, SolidContext,
+    SolidFusionPolicy, StaticBufferPlan, Tensor as SolidTensor, TensorSpec,
 };

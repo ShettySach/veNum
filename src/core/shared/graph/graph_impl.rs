@@ -2,6 +2,7 @@ use crate::core::shared::dtype::{Buffer, Scalar};
 
 use super::{Node, NodeId, Op};
 
+#[derive(Clone)]
 pub struct Graph {
     pub nodes: Vec<Node>,
 }

@@ -4,4 +4,4 @@ mod topo;
 
 pub use fused_kernel::{FusedKernel, ReduceKind};
 pub use schedule_item::ScheduleItem;
-pub use topo::build_schedule;
+pub use topo::{build_schedule, build_schedule_with_policy};
