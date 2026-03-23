@@ -2,7 +2,7 @@ use egglog::ast::Expr;
 use egglog::prelude::*;
 use std::collections::HashMap;
 
-use crate::core::lazy::graph::{Graph, NodeId, Op};
+use crate::core::shared::graph::{Graph, NodeId, Op};
 
 const SORT_TEXPR: &str = "TExpr";
 

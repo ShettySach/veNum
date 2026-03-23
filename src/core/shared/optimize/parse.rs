@@ -1,8 +1,8 @@
 use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
 
-use crate::core::lazy::dtype::{DType, Scalar};
-use crate::core::lazy::graph::{Graph, Node, NodeId, Op};
+use crate::core::shared::dtype::{DType, Scalar};
+use crate::core::shared::graph::{Graph, Node, NodeId, Op};
 
 struct ParseContext<'a> {
     original: &'a Graph,

@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-use crate::core::lazy::graph::{Graph, NodeId, Op};
 use crate::core::lazy::schedule::FusedKernel;
-use crate::core::lazy::shape_tracker::ShapeTracker;
+use crate::core::shared::graph::{Graph, NodeId, Op};
+use crate::core::shared::shape_tracker::ShapeTracker;
 
 // -------- kernel signature (structural identity for caching) --------
 

@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 
-use crate::core::lazy::graph::Op;
 use crate::core::lazy::tensor::Tensor;
+use crate::core::shared::graph::Op;
 
 impl Tensor {
     pub fn exp(&self) -> Result<Tensor> {

@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::core::lazy::graph::{Graph, NodeId, Op};
-use crate::core::lazy::shape_tracker::ShapeTracker;
+use crate::core::shared::graph::{Graph, NodeId, Op};
+use crate::core::shared::schedule::FusionPolicy;
+use crate::core::shared::shape_tracker::ShapeTracker;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ReduceKind {
@@ -74,6 +75,7 @@ pub struct ReduceOpItem {
 
 pub(super) struct KernelInputCollector<'a> {
     pub consumer_counts: &'a HashMap<NodeId, usize>,
+    pub policy: &'a dyn FusionPolicy,
     pub inlined: &'a mut HashSet<NodeId>,
     pub inputs: &'a mut Vec<NodeId>,
     pub trackers: &'a mut HashMap<NodeId, ShapeTracker>,
@@ -109,14 +111,12 @@ pub(super) fn collect_kernel_inputs(
                 }
 
                 // If the tracker is contiguous, the source's elements map 1:1
-                // to the kernel's flat iteration. If the source is also a
-                // single-consumer elementwise op with matching numel, we can
-                // inline its expression tree instead of materializing a buffer.
-                let source_node = graph.node(source);
+                // to the kernel's flat iteration. Use the fusion policy to decide
+                // if the source can be inlined.
                 let can_inline_source = tracker.is_contiguous()
-                    && source_node.op.is_elementwise()
-                    && *collector.consumer_counts.get(&source).unwrap_or(&0) == 1
-                    && source_node.numel() == node.numel();
+                    && collector
+                        .policy
+                        .can_inline(graph, source, id, collector.consumer_counts);
 
                 if can_inline_source {
                     collector.inlined.insert(source);
@@ -132,9 +132,11 @@ pub(super) fn collect_kernel_inputs(
             }
         }
 
-        let can_inline = input_node.op.is_elementwise()
-            && *collector.consumer_counts.get(&input_id).unwrap_or(&0) == 1
-            && input_node.numel() == node.numel();
+        // Use the fusion policy to decide if this node can be inlined
+        let can_inline =
+            collector
+                .policy
+                .can_inline(graph, input_id, id, collector.consumer_counts);
 
         if can_inline {
             collector.inlined.insert(input_id);

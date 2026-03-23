@@ -1,10 +1,10 @@
 use anyhow::Result;
 use std::sync::Arc;
 
-use crate::core::lazy::graph::Graph;
 use crate::core::lazy::jit::compile_kernel;
 use crate::core::lazy::kernel::ExecutableKernel;
 use crate::core::lazy::schedule::FusedKernel;
+use crate::core::shared::graph::Graph;
 
 /// Backend abstraction for compiling and executing fused kernels.
 ///

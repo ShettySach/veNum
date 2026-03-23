@@ -1,4 +1,4 @@
-use crate::core::lazy::dtype::Scalar;
+use crate::core::shared::dtype::Scalar;
 
 #[derive(Clone, Debug)]
 pub enum Op {

@@ -6,8 +6,6 @@ use cranelift_codegen::ir::Function;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{Linkage, Module};
 
-use crate::core::lazy::dtype::DType;
-use crate::core::lazy::graph::{Graph, NodeId};
 use crate::core::lazy::jit::compiled::CompiledKernel;
 use crate::core::lazy::jit::expr::{build_expression, ExprBuildContext};
 use crate::core::lazy::jit::math::{
@@ -17,6 +15,8 @@ use crate::core::lazy::jit::tracker::{
     compute_tracker_byte_offset, decompose_flat_index, flatten_multi_index,
 };
 use crate::core::lazy::schedule::{FusedKernel, ReduceKind};
+use crate::core::shared::dtype::DType;
+use crate::core::shared::graph::{Graph, NodeId};
 
 struct KernelBuilderContext<'a> {
     graph: &'a Graph,

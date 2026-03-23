@@ -1,8 +1,8 @@
 use anyhow::{bail, Result};
 
 use crate::core::iters::Indexer;
-use crate::core::lazy::dtype::Buffer;
-use crate::core::lazy::graph::Op;
+use crate::core::shared::dtype::Buffer;
+use crate::core::shared::graph::Op;
 
 pub(crate) fn execute_shape_op_typed(
     op: &Op,

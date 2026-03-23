@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use anyhow::Result;
 use cranelift::prelude::{types, FunctionBuilder, InstBuilder, MemFlags, Value};
 
-use crate::core::lazy::dtype::{DType, Scalar};
-use crate::core::lazy::graph::{Graph, NodeId, Op};
 use crate::core::lazy::jit::math::{math_func_ref_for_op, MathFuncRefs};
+use crate::core::shared::dtype::{DType, Scalar};
+use crate::core::shared::graph::{Graph, NodeId, Op};
 
 pub(super) struct ExprBuildContext<'a> {
     pub graph: &'a Graph,

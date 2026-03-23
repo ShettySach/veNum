@@ -3,15 +3,17 @@ use std::sync::Arc;
 
 use crate::core::lazy::{
     context::SharedBufferPool,
-    dtype::{Buffer, RealizedTensor},
-    exec,
-    graph::{Graph, NodeId},
-    optimize,
     plan::{build_plan, ExecItem, ExecutionPlan, GraphSignature},
     tensor::{
         helpers::{clone_reachable_subgraph, is_optimize_safe},
         Tensor,
     },
+};
+use crate::core::shared::{
+    dtype::{Buffer, RealizedTensor},
+    exec,
+    graph::{Graph, NodeId},
+    optimize,
 };
 
 impl Tensor {

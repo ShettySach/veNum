@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use crate::core::lazy::dtype::Scalar;
-use crate::core::lazy::graph::{Graph, NodeId, Op};
 use crate::core::lazy::kernel::ExecutableKernel;
+use crate::core::shared::dtype::Scalar;
+use crate::core::shared::graph::{Graph, NodeId, Op};
 
 /// A single step in a cached execution plan.
 pub enum ExecItem {

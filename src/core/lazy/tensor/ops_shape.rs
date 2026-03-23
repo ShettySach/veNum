@@ -1,8 +1,8 @@
 use anyhow::{bail, Result};
 
 use crate::core::errors::{ExpansionError, ReshapeError, TransposeError, UnsqueezeError};
-use crate::core::lazy::dtype::Scalar;
 use crate::core::lazy::tensor::Tensor;
+use crate::core::shared::dtype::Scalar;
 
 impl Tensor {
     pub fn reshape(&self, sizes: Vec<usize>) -> Result<Tensor> {

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::{bail, Result};
 
-use crate::core::lazy::graph::{Graph, Node, NodeId, Op};
+use crate::core::shared::graph::{Graph, Node, NodeId, Op};
 
 pub(super) fn clone_reachable_subgraph(src: &Graph, root: NodeId) -> (Graph, NodeId) {
     let (dst, new_root, _) = clone_reachable_subgraph_with_map(src, root);

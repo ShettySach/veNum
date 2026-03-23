@@ -1,9 +1,8 @@
 use std::collections::HashSet;
 
-use crate::core::lazy::graph::{Graph, NodeId};
-use crate::core::lazy::schedule::{build_schedule, ScheduleItem};
-
 use crate::core::lazy::render::labels::{node_label, op_label};
+use crate::core::lazy::schedule::{build_schedule, ScheduleItem};
+use crate::core::shared::graph::{Graph, NodeId};
 
 /// Render the raw DAG (before fusion) rooted at `root` as Mermaid flowchart code.
 pub fn render_dag(graph: &Graph, root: NodeId) -> String {

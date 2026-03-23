@@ -2,12 +2,12 @@ use anyhow::Result;
 use std::sync::Arc;
 
 use crate::core::lazy::backend::Backend;
-use crate::core::lazy::graph::{Graph, NodeId, Op};
 use crate::core::lazy::jit::KernelSignature;
 use crate::core::lazy::kernel::ExecutableKernel;
 use crate::core::lazy::lru_cache::LruCache;
 use crate::core::lazy::plan::{ExecItem, ExecutionPlan};
 use crate::core::lazy::schedule::{build_schedule, ScheduleItem};
+use crate::core::shared::graph::{Graph, NodeId, Op};
 
 /// Build an `ExecutionPlan` from an execution graph.
 pub fn build_plan(

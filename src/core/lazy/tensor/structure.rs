@@ -2,8 +2,8 @@ use anyhow::{bail, Result};
 use std::sync::Arc;
 
 use crate::core::lazy::context::Context;
-use crate::core::lazy::dtype::DType;
-use crate::core::lazy::graph::{Graph, NodeId, Op};
+use crate::core::shared::dtype::DType;
+use crate::core::shared::graph::{Graph, NodeId, Op};
 
 #[derive(Clone)]
 pub struct Tensor {

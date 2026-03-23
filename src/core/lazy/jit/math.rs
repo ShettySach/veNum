@@ -4,7 +4,7 @@ use cranelift_codegen::ir::FuncRef;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 
-use crate::core::lazy::dtype::DType;
+use crate::core::shared::dtype::DType;
 
 // -------- JIT-linked math functions --------
 

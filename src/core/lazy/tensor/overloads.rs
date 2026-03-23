@@ -1,7 +1,7 @@
 use anyhow::Result;
 
-use crate::core::lazy::graph::Op;
 use crate::core::lazy::tensor::Tensor;
+use crate::core::shared::graph::Op;
 
 macro_rules! impl_binop {
     ($trait:ident, $method:ident, $op:expr) => {

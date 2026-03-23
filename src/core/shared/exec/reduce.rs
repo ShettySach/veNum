@@ -2,8 +2,8 @@ use anyhow::{bail, Result};
 use std::cmp::Ordering;
 
 use crate::core::iters::Indexer;
-use crate::core::lazy::dtype::Buffer;
-use crate::core::lazy::graph::Op;
+use crate::core::shared::dtype::Buffer;
+use crate::core::shared::graph::Op;
 
 pub(crate) fn execute_reduce_op_typed(
     op: &Op,

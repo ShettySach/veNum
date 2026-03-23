@@ -169,7 +169,7 @@ impl ShapeTracker {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::lazy::shape_tracker::*;
+    use super::*;
 
     #[test]
     fn contiguous_1d() {

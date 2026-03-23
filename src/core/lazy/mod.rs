@@ -1,19 +1,20 @@
 mod backend;
 mod context;
-mod dtype;
-mod exec;
-mod graph;
+mod fusion_policy;
 mod jit;
 mod kernel;
 mod lru_cache;
-mod optimize;
 mod plan;
 mod render;
 mod schedule;
-pub(crate) mod shape_tracker;
 mod tensor;
 mod tests;
 
+// Re-export shared types for public API (used by lib.rs)
+pub use crate::core::shared::dtype::{DType, RealizedTensor, Scalar};
+
+// Local exports
 pub use context::Context;
-pub use dtype::{DType, RealizedTensor, Scalar};
+#[allow(unused_imports)]
+pub use fusion_policy::LiquidFusionPolicy;
 pub use tensor::Tensor;

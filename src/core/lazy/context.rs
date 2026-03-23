@@ -1,11 +1,11 @@
 use std::sync::{Arc, Mutex};
 
 use crate::core::lazy::backend::{Backend, CpuBackend};
-use crate::core::lazy::graph::Graph;
 use crate::core::lazy::jit::KernelSignature;
 use crate::core::lazy::kernel::ExecutableKernel;
 use crate::core::lazy::lru_cache::LruCache;
 use crate::core::lazy::plan::{BufferPool, ExecutionPlan, GraphSignature};
+use crate::core::shared::graph::Graph;
 
 /// Cache of JIT-compiled kernels keyed by structural signature.
 pub(crate) type KernelCache = Arc<Mutex<LruCache<KernelSignature, Arc<dyn ExecutableKernel>>>>;

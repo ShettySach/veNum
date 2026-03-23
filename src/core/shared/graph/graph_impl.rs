@@ -1,6 +1,6 @@
-use crate::core::lazy::dtype::{Buffer, Scalar};
+use crate::core::shared::dtype::{Buffer, Scalar};
 
-use crate::core::lazy::graph::{Node, NodeId, Op};
+use super::{Node, NodeId, Op};
 
 pub struct Graph {
     pub nodes: Vec<Node>,

@@ -1,8 +1,9 @@
 use anyhow::Result;
 
+use crate::core::lazy::render;
 use crate::core::lazy::tensor::helpers::{clone_reachable_subgraph, is_optimize_safe};
 use crate::core::lazy::tensor::Tensor;
-use crate::core::lazy::{optimize, render};
+use crate::core::shared::optimize;
 
 impl Tensor {
     pub fn render_dag(&self) -> String {

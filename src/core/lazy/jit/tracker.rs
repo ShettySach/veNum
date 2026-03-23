@@ -1,6 +1,6 @@
 use cranelift::prelude::{types, FunctionBuilder, InstBuilder, Value};
 
-use crate::core::lazy::shape_tracker::ShapeTracker;
+use crate::core::shared::shape_tracker::ShapeTracker;
 
 /// Decompose a flat index `i` into per-dimension indices for `output_shape`.
 ///

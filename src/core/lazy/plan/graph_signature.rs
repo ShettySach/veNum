@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 
-use crate::core::lazy::graph::{Graph, NodeId, Op};
+use crate::core::shared::graph::{Graph, NodeId, Op};
 
 /// Structural identity of the reachable computation graph for a root node.
 ///

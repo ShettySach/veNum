@@ -1,13 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::core::lazy::graph::{Graph, NodeId, Op};
-use crate::core::lazy::shape_tracker::ShapeTracker;
-
+use crate::core::lazy::fusion_policy::LiquidFusionPolicy;
 use crate::core::lazy::schedule::fused_kernel::{
     collect_kernel_inputs, try_build_tracker, FusedKernel, KernelInputCollector, ReduceKind,
     ReduceOpItem, ReduceSpec, ShapeOpItem,
 };
 use crate::core::lazy::schedule::schedule_item::ScheduleItem;
+use crate::core::shared::graph::{Graph, NodeId, Op};
+use crate::core::shared::schedule::FusionPolicy;
+use crate::core::shared::shape_tracker::ShapeTracker;
 
 fn build_input_index_map(input_buffers: &[NodeId]) -> HashMap<NodeId, usize> {
     input_buffers
@@ -102,7 +103,7 @@ struct ScheduleAnalysis {
 
 // ── Pass 1: analyze ─────────────────────────────────────────────────────
 
-fn analyze_schedule(graph: &Graph, root: NodeId) -> ScheduleAnalysis {
+fn analyze_schedule(graph: &Graph, root: NodeId, policy: &dyn FusionPolicy) -> ScheduleAnalysis {
     let topo = topo_sort(graph, root);
     let consumer_counts = compute_consumer_counts(graph, &topo);
     let consumers = compute_consumers(graph, &topo);
@@ -124,9 +125,9 @@ fn analyze_schedule(graph: &Graph, root: NodeId) -> ScheduleAnalysis {
         let plan = if node.op.is_shape_op() {
             analyze_shape_node(graph, id)
         } else if node.op.is_reduce_op() {
-            analyze_reduce_node(graph, id, &consumer_counts, &consumers)
+            analyze_reduce_node(graph, id, &consumer_counts, &consumers, policy)
         } else if node.op.is_elementwise() {
-            analyze_elementwise_node(graph, id, &consumer_counts, &consumers)
+            analyze_elementwise_node(graph, id, &consumer_counts, &consumers, policy)
         } else {
             continue;
         };
@@ -160,6 +161,7 @@ fn analyze_elementwise_node(
     id: NodeId,
     consumer_counts: &HashMap<NodeId, usize>,
     consumers: &HashMap<NodeId, Vec<NodeId>>,
+    policy: &dyn FusionPolicy,
 ) -> NodePlan {
     let mut absorbed = HashSet::new();
     let mut input_buffers = Vec::new();
@@ -173,6 +175,7 @@ fn analyze_elementwise_node(
         id,
         &mut KernelInputCollector {
             consumer_counts,
+            policy,
             inlined: &mut absorbed,
             inputs: &mut input_buffers,
             trackers: &mut input_trackers,
@@ -217,6 +220,7 @@ fn analyze_reduce_node(
     id: NodeId,
     consumer_counts: &HashMap<NodeId, usize>,
     consumers: &HashMap<NodeId, Vec<NodeId>>,
+    policy: &dyn FusionPolicy,
 ) -> NodePlan {
     let node = graph.node(id);
     let expr_input = node.inputs[0];
@@ -229,6 +233,7 @@ fn analyze_reduce_node(
             reduce_spec,
             consumer_counts,
             consumers,
+            policy,
         ) {
             return plan;
         }
@@ -255,6 +260,7 @@ fn try_fused_reduce(
     reduce_spec: ReduceSpec,
     consumer_counts: &HashMap<NodeId, usize>,
     consumers: &HashMap<NodeId, Vec<NodeId>>,
+    policy: &dyn FusionPolicy,
 ) -> Option<NodePlan> {
     let node = graph.node(id);
     let expr_node = graph.node(expr_input);
@@ -296,6 +302,7 @@ fn try_fused_reduce(
             expr_input,
             &mut KernelInputCollector {
                 consumer_counts,
+                policy,
                 inlined: &mut absorbed,
                 inputs: &mut input_buffers,
                 trackers: &mut input_trackers,
@@ -357,8 +364,18 @@ fn emit_schedule(analysis: &mut ScheduleAnalysis) -> Vec<ScheduleItem> {
 // ── Public entry point ──────────────────────────────────────────────────
 
 /// Build a linear execution schedule from the graph, rooted at `root`.
+/// Uses the default `LiquidFusionPolicy` for fusion decisions.
 pub fn build_schedule(graph: &Graph, root: NodeId) -> Vec<ScheduleItem> {
-    let mut analysis = analyze_schedule(graph, root);
+    build_schedule_with_policy(graph, root, &LiquidFusionPolicy)
+}
+
+/// Build a linear execution schedule from the graph with a custom fusion policy.
+pub fn build_schedule_with_policy(
+    graph: &Graph,
+    root: NodeId,
+    policy: &dyn FusionPolicy,
+) -> Vec<ScheduleItem> {
+    let mut analysis = analyze_schedule(graph, root, policy);
     emit_schedule(&mut analysis)
 }
 

@@ -1,7 +1,7 @@
 use anyhow::Result;
 
-use crate::core::lazy::exec;
 use crate::core::lazy::tensor::Tensor;
+use crate::core::shared::exec;
 
 impl Tensor {
     pub fn sum_dims(&self, dimensions: Vec<usize>, keepdims: bool) -> Result<Tensor> {

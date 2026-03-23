@@ -1,4 +1,4 @@
-use crate::core::lazy::dtype::{Buffer, DType, Scalar};
+use crate::core::shared::dtype::{Buffer, DType, Scalar};
 
 pub(crate) fn scalar_fill_buffer(val: Scalar, numel: usize) -> Buffer {
     match val {
