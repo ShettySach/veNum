@@ -1,4 +1,4 @@
-use venum::{solid_compile, Buffer, DType, LiquidContext, SolidContext, Tensor};
+use venum::{compile, Buffer, DType, LiquidContext, SolidContext, Tensor};
 
 fn main() -> anyhow::Result<()> {
     // ── Liquid mode (JIT, per-tensor) ───────────────────────────────────
@@ -21,28 +21,25 @@ fn main() -> anyhow::Result<()> {
     // ── Solid mode (AOT, whole-program) ─────────────────────────────────
     println!("═══ Solid (AOT) ═══\n");
 
-    let solid_cx = SolidContext::new();
+    let cx1 = SolidContext::new();
 
     // Create placeholder inputs (shapes known at compile time, data provided at runtime)
-    let x_solid = Tensor::placeholder(&solid_cx, vec![3, 3, 2], DType::F32);
-    let y_solid = Tensor::placeholder(&solid_cx, vec![2, 5], DType::F32);
+    let x1 = Tensor::placeholder(&cx1, vec![3, 3, 2], DType::F32);
+    let y1 = Tensor::placeholder(&cx1, vec![2, 5], DType::F32);
 
     // Build computation graph
-    let z_solid = x_solid.matmul(&y_solid)?;
+    let z1 = x1.matmul(&y1)?;
 
     // Compile the program (AOT compilation)
-    let program = solid_compile(&solid_cx, &[x_solid.id(), y_solid.id()], &[z_solid.id()])?;
+    let program = compile(&cx1, &[x1.id(), y1.id()], &[z1.id()])?;
 
     println!("Input specs: {:?}", program.input_specs);
     println!("Output specs: {:?}", program.output_specs);
     println!("Buffer plan slots: {}\n", program.buffer_plan.slots.len());
 
     // Prepare input data (same as Liquid mode)
-    let x_data: Vec<f32> = (0..18).map(|i| i as f32).collect();
-    let y_data: Vec<f32> = (0..10).map(|i| i as f32).collect();
-
-    let x_buf = Buffer::from_f32_vec(x_data);
-    let y_buf = Buffer::from_f32_vec(y_data);
+    let x_buf = Buffer::from_f32_vec((0..18).map(|i| i as f32).collect());
+    let y_buf = Buffer::from_f32_vec((0..10).map(|i| i as f32).collect());
 
     // Execute the compiled program
     let results = program.execute(&[&x_buf, &y_buf])?;

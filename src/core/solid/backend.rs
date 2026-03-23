@@ -39,7 +39,7 @@ impl CpuSolidBackend {
     /// Create a new CPU Solid backend.
     pub fn new() -> Self {
         Self {
-            generator: CpuCodeGenerator::new(),
+            generator: CpuCodeGenerator {},
         }
     }
 }

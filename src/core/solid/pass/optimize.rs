@@ -22,11 +22,7 @@ impl GraphPass for OptimizationPass {
     }
 
     fn run(&self, ctx: PassContext) -> Result<PassContext> {
-        let PassContext {
-            graph,
-            inputs: _,
-            outputs,
-        } = ctx;
+        let PassContext { graph, outputs, .. } = ctx;
 
         let mut current_graph = graph;
         let mut new_outputs = Vec::with_capacity(outputs.len());

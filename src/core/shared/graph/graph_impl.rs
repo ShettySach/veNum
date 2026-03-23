@@ -2,14 +2,14 @@ use crate::core::shared::dtype::{Buffer, Scalar};
 
 use super::{Node, NodeId, Op};
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Graph {
     pub nodes: Vec<Node>,
 }
 
 impl Graph {
     pub fn new() -> Self {
-        Graph { nodes: Vec::new() }
+        Self::default()
     }
 
     pub fn add_node(&mut self, node: Node) -> NodeId {

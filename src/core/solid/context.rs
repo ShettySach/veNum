@@ -60,17 +60,27 @@ impl SolidContext {
     ///
     /// This is called internally by `Tensor::placeholder()`.
     pub(crate) fn register_input(&self, id: NodeId) {
-        self.inputs.lock().unwrap().push(id);
+        self.inputs
+            .lock()
+            .expect("Inputs mutex should not be poisoned")
+            .push(id);
     }
 
     /// Get all registered symbolic inputs.
     pub fn inputs(&self) -> Vec<NodeId> {
-        self.inputs.lock().unwrap().clone()
+        self.inputs
+            .lock()
+            .expect("Inputs mutex should not be poisoned")
+            .clone()
     }
 
     /// Get the number of nodes in the graph.
     pub fn num_nodes(&self) -> usize {
-        self.graph.lock().unwrap().nodes.len()
+        self.graph
+            .lock()
+            .expect("Graph mutex should not be poisoned")
+            .nodes
+            .len()
     }
 }
 

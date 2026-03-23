@@ -10,11 +10,6 @@ use super::context::Context;
 /// Generic over `C: Context` to work with both Liquid (JIT) and Solid (AOT) modes.
 /// The tensor itself is always a graph node reference - execution semantics
 /// are determined by the context type.
-///
-/// # Type Aliases
-///
-/// - `liquid::LiquidTensor` = `Tensor<LiquidContext>`
-/// - `solid::Tensor` = `Tensor<SolidContext>`
 #[derive(Clone)]
 pub struct Tensor<C: Context> {
     pub(crate) cx: C,

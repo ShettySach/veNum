@@ -24,19 +24,6 @@ use crate::core::shared::graph::Graph;
 /// - Collected and linked into a program (Solid mode)
 pub struct CpuCodeGenerator;
 
-impl CpuCodeGenerator {
-    /// Create a new CPU code generator.
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl Default for CpuCodeGenerator {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl CodeGenerator for CpuCodeGenerator {
     fn generate_kernel(
         &self,

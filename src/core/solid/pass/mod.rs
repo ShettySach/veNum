@@ -5,9 +5,9 @@
 //!
 //! # Pass Pipeline
 //!
-//! 1. **OptimizationPass** — Egglog equality saturation (shared with Liquid)
-//! 2. **FusionPass** — Global kernel fusion using `SolidFusionPolicy`
-//! 3. **MemoryPlanningPass** — Liveness analysis and static buffer allocation
+//! 1. **OptimizationPass** - Egglog equality saturation (shared with Liquid)
+//! 2. **FusionPass** - Global kernel fusion using `SolidFusionPolicy`
+//! 3. **MemoryPlanningPass** - Liveness analysis and static buffer allocation
 
 pub mod fusion;
 pub mod manager;

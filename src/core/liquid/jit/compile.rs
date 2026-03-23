@@ -2,12 +2,11 @@ use anyhow::Result;
 use cranelift_jit::JITModule;
 use cranelift_module::Module;
 
-use crate::core::liquid::jit::compiled::CompiledKernel;
-use crate::core::liquid::schedule::FusedKernel;
-use crate::core::shared::codegen::cranelift_setup::create_native_isa;
-use crate::core::shared::codegen::CodeGenerator;
-use crate::core::shared::codegen::CpuCodeGenerator;
-use crate::core::shared::graph::Graph;
+use crate::core::liquid::{jit::compiled::CompiledKernel, schedule::FusedKernel};
+use crate::core::shared::{
+    codegen::{cranelift_setup::create_native_isa, CodeGenerator, CpuCodeGenerator},
+    graph::Graph,
+};
 
 /// Compile a fused elementwise kernel into native code via Cranelift.
 ///
@@ -32,7 +31,7 @@ pub fn compile_kernel(
     // Use the shared CPU code generator to generate Cranelift IR
     // IMPORTANT: Pass the module by mutable reference so math function
     // references remain valid throughout the function's lifetime
-    let generator = CpuCodeGenerator::new();
+    let generator = CpuCodeGenerator {};
     let generated = generator.generate_kernel(&mut module, graph, kernel, capture_ir)?;
 
     // Now finalize: compile the Cranelift function to machine code

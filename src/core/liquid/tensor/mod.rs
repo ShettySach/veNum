@@ -3,6 +3,7 @@
 //! Re-exports the shared `Tensor<LiquidContext>` type and provides
 //! Liquid-specific extensions like `realize()` and `arange()`.
 
-mod liquid_constructors;
+mod constructors;
+mod helpers;
 mod realize;
 mod visualize;

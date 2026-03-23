@@ -30,7 +30,7 @@ use super::program::spec::TensorSpec;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
 /// let cx = SolidContext::new();
 /// let input = Tensor::placeholder(&cx, vec![4], DType::F32);
 /// let output = input.exp();
@@ -59,7 +59,11 @@ pub fn compile_with_backend(
         bail!("compile requires at least one output");
     }
 
-    let graph = cx.graph().lock().unwrap().clone();
+    let graph = cx
+        .graph()
+        .lock()
+        .expect("Graph mutex should not be poisoned")
+        .clone();
 
     // Validate inputs are placeholders (Load with no buffer)
     for &id in inputs {

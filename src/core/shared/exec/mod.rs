@@ -1,6 +1,7 @@
 mod buffer;
 mod reduce;
 mod shape;
+mod utils;
 
 pub(crate) use buffer::{buffer_from_bytes, scalar_fill_buffer};
 pub(crate) use reduce::execute_reduce_op_typed;

@@ -4,6 +4,8 @@ use crate::core::iters::Indexer;
 use crate::core::shared::dtype::Buffer;
 use crate::core::shared::graph::Op;
 
+use super::utils::idx_to_offset;
+
 pub(crate) fn execute_shape_op_typed(
     op: &Op,
     input_buf: &Buffer,
@@ -316,14 +318,4 @@ fn execute_pad<T: Copy>(
     }
 
     Ok(out)
-}
-
-fn idx_to_offset(index: &[usize], shape: &[usize]) -> usize {
-    let mut stride = 1usize;
-    let mut off = 0usize;
-    for d in (0..shape.len()).rev() {
-        off += index[d] * stride;
-        stride *= shape[d];
-    }
-    off
 }
