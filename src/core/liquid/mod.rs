@@ -14,5 +14,4 @@ mod tests;
 pub use crate::core::shared::dtype::{DType, RealizedTensor, Scalar};
 
 // Local exports
-pub use context::Context;
-pub use tensor::Tensor;
+pub use context::LiquidContext;

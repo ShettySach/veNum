@@ -98,7 +98,9 @@ fn is_optimize_safe(graph: &crate::core::shared::graph::Graph, root: NodeId) -> 
 }
 
 /// Discover placeholder inputs in the graph (Load nodes with no buffer).
-fn discover_inputs(graph: &crate::core::shared::graph::Graph) -> Vec<crate::core::shared::graph::NodeId> {
+fn discover_inputs(
+    graph: &crate::core::shared::graph::Graph,
+) -> Vec<crate::core::shared::graph::NodeId> {
     use crate::core::shared::graph::{NodeId, Op};
 
     graph

@@ -1,7 +1,7 @@
-use venum::{Context, Tensor};
+use venum::{LiquidContext, Tensor};
 
 fn main() -> anyhow::Result<()> {
-    let cx = Context::new();
+    let cx = LiquidContext::new();
 
     let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
     let b = Tensor::from_slice(&cx, &[10.0, 20.0, 30.0, 40.0], vec![2, 2]);

@@ -114,8 +114,7 @@ impl ExecutableKernel for SolidCompiledKernel {
     fn execute(&self, inputs: &[*const u8], output: *mut u8, numel: usize) {
         debug_assert_eq!(inputs.len(), self.num_inputs);
         unsafe {
-            let f: extern "C" fn(*const *const u8, *mut u8, u64) =
-                std::mem::transmute(self.fn_ptr);
+            let f: extern "C" fn(*const *const u8, *mut u8, u64) = std::mem::transmute(self.fn_ptr);
             f(inputs.as_ptr(), output, numel as u64);
         }
     }

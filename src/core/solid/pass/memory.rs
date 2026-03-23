@@ -94,9 +94,9 @@ impl MemoryPlanningPass {
             let assigned_slot = if is_output {
                 None
             } else {
-                slot_states.iter().position(|s| {
-                    s.dtype == dtype && s.size >= size && s.free_after < def_step
-                })
+                slot_states
+                    .iter()
+                    .position(|s| s.dtype == dtype && s.size >= size && s.free_after < def_step)
             };
 
             match assigned_slot {
@@ -121,10 +121,7 @@ impl MemoryPlanningPass {
 }
 
 /// Topological sort over multiple roots, deduplicating visits.
-fn topo_sort_multi(
-    graph: &crate::core::shared::graph::Graph,
-    roots: &[NodeId],
-) -> Vec<NodeId> {
+fn topo_sort_multi(graph: &crate::core::shared::graph::Graph, roots: &[NodeId]) -> Vec<NodeId> {
     let mut visited = HashSet::new();
     let mut order = Vec::new();
 

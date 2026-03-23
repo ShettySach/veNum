@@ -12,11 +12,13 @@ Vectorized _N_-dimensional numericals
 
 mod core;
 
-pub use core::liquid::{Context, DType, RealizedTensor, Scalar, Tensor};
+pub use core::liquid::{DType, LiquidContext, RealizedTensor, Scalar};
 pub use core::naive::ops::conv;
 pub use core::naive::NaiveTensor;
+pub use core::shared::dtype::Buffer;
+pub use core::shared::tensor::Tensor;
 pub use core::solid::{
     compile as solid_compile, CompiledProgram, CpuSolidBackend, FusionPass, GraphPass,
     MemoryPlanningPass, OptimizationPass, PassManager, SolidBackend, SolidContext,
-    SolidFusionPolicy, StaticBufferPlan, Tensor as SolidTensor, TensorSpec,
+    SolidFusionPolicy, StaticBufferPlan, TensorSpec,
 };

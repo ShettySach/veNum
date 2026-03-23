@@ -1,19 +1,31 @@
-//! Matrix multiplication for Solid tensors.
+//! Matrix multiplication for tensors.
 
 use anyhow::{bail, Result};
 
-use crate::core::solid::tensor::Tensor;
+use super::context::Context;
+use super::helpers::broadcast_batch;
+use super::structure::Tensor;
 
-impl Tensor {
+impl<C: Context> Tensor<C> {
     /// Matrix multiplication.
     ///
-    /// For 2D tensors: standard matrix multiply
-    /// For 3D+ tensors: batched matrix multiply
+    /// For 2D tensors: standard matrix multiply `[M, K] @ [K, N] -> [M, N]`
+    /// For 3D+ tensors: batched matrix multiply with broadcasting
     ///
-    /// Implemented as reshape + expand + multiply + sum (same as Liquid mode).
-    pub fn matmul(&self, rhs: &Tensor) -> Result<Tensor> {
+    /// # Example
+    ///
+    /// ```ignore
+    /// let a = Tensor::from_slice(&cx, &data_a, vec![2, 3]);  // [2, 3]
+    /// let b = Tensor::from_slice(&cx, &data_b, vec![3, 4]);  // [3, 4]
+    /// let c = a.matmul(&b)?;  // [2, 4]
+    /// ```
+    pub fn matmul(&self, rhs: &Tensor<C>) -> Result<Tensor<C>> {
         if self.dtype != rhs.dtype {
-            bail!("matmul requires matching dtypes");
+            bail!(
+                "matmul requires matching dtypes: {:?} vs {:?}",
+                self.dtype,
+                rhs.dtype
+            );
         }
 
         let a_shape = &self.shape;
@@ -45,6 +57,9 @@ impl Tensor {
         let batch = broadcast_batch(batch_a, batch_b)?;
         let blen = batch.len();
 
+        // Pad batch dims with leading 1s to match broadcast rank, then add
+        // the extra dim for the dot-product axis, then expand everything.
+        //
         // a: [batch_a..., M, K] -> reshape [1..., batch_a..., M, K, 1]
         //                       -> expand  [batch...,         M, K, N]
         let mut a_rs = vec![1usize; blen - batch_a.len()];
@@ -66,35 +81,4 @@ impl Tensor {
         // elementwise mul then sum-reduce over K
         lhs.mul(&rhs)?.sum(&[(blen + 1) as isize], false)
     }
-}
-
-// Helper function from lazy/tensor/helpers.rs
-fn broadcast_batch(a: &[usize], b: &[usize]) -> Result<Vec<usize>> {
-    let max_len = a.len().max(b.len());
-    let mut result = Vec::with_capacity(max_len);
-
-    for i in 0..max_len {
-        let a_idx = if i < a.len() {
-            a.len() - 1 - i
-        } else {
-            usize::MAX
-        };
-        let b_idx = if i < b.len() {
-            b.len() - 1 - i
-        } else {
-            usize::MAX
-        };
-
-        let a_val = if a_idx < a.len() { a[a_idx] } else { 1 };
-        let b_val = if b_idx < b.len() { b[b_idx] } else { 1 };
-
-        if a_val != b_val && a_val != 1 && b_val != 1 {
-            bail!("incompatible batch dimensions: {:?} vs {:?}", a, b);
-        }
-
-        result.push(a_val.max(b_val));
-    }
-
-    result.reverse();
-    Ok(result)
 }

@@ -38,9 +38,7 @@ pub struct PassManager {
 impl PassManager {
     /// Create a new empty pass manager.
     pub fn new() -> Self {
-        Self {
-            passes: Vec::new(),
-        }
+        Self { passes: Vec::new() }
     }
 
     /// Add a pass to the pipeline.

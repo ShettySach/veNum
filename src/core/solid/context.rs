@@ -3,6 +3,7 @@
 use std::sync::{Arc, Mutex};
 
 use crate::core::shared::graph::{Graph, NodeId};
+use crate::core::shared::tensor::Context;
 
 /// Context for Solid (AOT) execution mode.
 ///
@@ -76,6 +77,13 @@ impl SolidContext {
 impl Default for SolidContext {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// Implement the shared Context trait for unified tensor operations
+impl Context for SolidContext {
+    fn graph(&self) -> &Arc<Mutex<Graph>> {
+        &self.graph
     }
 }
 

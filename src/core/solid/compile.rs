@@ -37,7 +37,11 @@ use super::program::spec::TensorSpec;
 /// let program = compile(&cx, &[input.id()], &[output.id()])?;
 /// let results = program.execute(&[&input_buffer])?;
 /// ```
-pub fn compile(cx: &SolidContext, inputs: &[NodeId], outputs: &[NodeId]) -> Result<CompiledProgram> {
+pub fn compile(
+    cx: &SolidContext,
+    inputs: &[NodeId],
+    outputs: &[NodeId],
+) -> Result<CompiledProgram> {
     compile_with_backend(cx, inputs, outputs, &CpuSolidBackend::new())
 }
 
@@ -154,5 +158,3 @@ pub fn compile_with_backend(
         steps: execution_steps,
     })
 }
-
-

@@ -1,10 +1,10 @@
-use venum::{solid_compile, Context, DType, SolidContext, SolidTensor, Tensor};
+use venum::{solid_compile, Buffer, DType, LiquidContext, SolidContext, Tensor};
 
 fn main() -> anyhow::Result<()> {
     // ── Liquid mode (JIT, per-tensor) ───────────────────────────────────
     println!("═══ Liquid (JIT) ═══\n");
 
-    let cx = Context::new();
+    let cx = LiquidContext::new();
 
     let x = Tensor::arange(&cx, 0.0, 18.0, 1.0)?.reshape(vec![3, 3, 2])?;
     let y = Tensor::arange(&cx, 0.0, 10.0, 1.0)?.reshape(vec![2, 5])?;
@@ -21,49 +21,47 @@ fn main() -> anyhow::Result<()> {
     // ── Solid mode (AOT, whole-program) ─────────────────────────────────
     println!("═══ Solid (AOT) ═══\n");
 
-    let scx = SolidContext::new();
+    let solid_cx = SolidContext::new();
 
-    let a = SolidTensor::placeholder(&scx, vec![3, 3, 2], DType::F32);
-    let b = SolidTensor::placeholder(&scx, vec![2, 5], DType::F32);
+    // Create placeholder inputs (shapes known at compile time, data provided at runtime)
+    let x_solid = Tensor::placeholder(&solid_cx, vec![3, 3, 2], DType::F32);
+    let y_solid = Tensor::placeholder(&solid_cx, vec![2, 5], DType::F32);
 
-    let c = a.matmul(&b)?;
+    // Build computation graph
+    let z_solid = x_solid.matmul(&y_solid)?;
 
-    // Compile entire graph ahead-of-time
-    let program = solid_compile(&scx, &[a.id(), b.id()], &[c.id()])?;
-    println!(
-        "Compiled: {} kernel(s), {} step(s)\n",
-        program.num_kernels(),
-        program.num_steps()
-    );
+    // Compile the program (AOT compilation)
+    let program = solid_compile(&solid_cx, &[x_solid.id(), y_solid.id()], &[z_solid.id()])?;
 
-    // Execute with concrete data (reusable)
-    let a_data: Vec<f32> = (0..18).map(|i| i as f32).collect();
-    let b_data: Vec<f32> = (0..10).map(|i| i as f32).collect();
-    let a_buf = venum::Scalar::F32(0.0); // unused, just for Buffer construction
-    let _ = a_buf;
-    let a_buf = venum::DType::F32;
-    let _ = a_buf;
+    println!("Input specs: {:?}", program.input_specs);
+    println!("Output specs: {:?}", program.output_specs);
+    println!("Buffer plan slots: {}\n", program.buffer_plan.slots.len());
 
-    let a_buf = crate_buffer_f32(&a_data);
-    let b_buf = crate_buffer_f32(&b_data);
+    // Prepare input data (same as Liquid mode)
+    let x_data: Vec<f32> = (0..18).map(|i| i as f32).collect();
+    let y_data: Vec<f32> = (0..10).map(|i| i as f32).collect();
 
-    let results = program.execute(&[&a_buf, &b_buf])?;
+    let x_buf = Buffer::from_f32_vec(x_data);
+    let y_buf = Buffer::from_f32_vec(y_data);
+
+    // Execute the compiled program
+    let results = program.execute(&[&x_buf, &y_buf])?;
 
     println!("Result shape: {:?}", program.output_specs[0].shape);
     println!("Result: {:?}\n", results[0].as_f32());
 
-    // Run again with different data to show program reuse
-    let a2: Vec<f32> = (0..18).map(|i| (i as f32) * 0.1).collect();
-    let b2: Vec<f32> = (0..10).map(|i| (i as f32) * 2.0).collect();
-    let a2_buf = crate_buffer_f32(&a2);
-    let b2_buf = crate_buffer_f32(&b2);
+    // Verify results match
+    println!("═══ Verification ═══\n");
+    let liquid_result = result.data();
+    let solid_result = results[0].as_f32();
 
-    let results2 = program.execute(&[&a2_buf, &b2_buf])?;
-    println!("Reuse with new data: {:?}", results2[0].as_f32());
+    if liquid_result == solid_result {
+        println!("Results match!");
+    } else {
+        println!("Results differ!");
+        println!("Liquid: {:?}", liquid_result);
+        println!("Solid:  {:?}", solid_result);
+    }
 
     Ok(())
-}
-
-fn crate_buffer_f32(data: &[f32]) -> venum::DType {
-    todo!()
 }

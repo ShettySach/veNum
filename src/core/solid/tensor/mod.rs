@@ -1,10 +1,6 @@
-//! Tensor operations for Solid mode.
+//! Solid tensor module.
+//!
+//! Re-exports the shared `Tensor<SolidContext>` type and provides
+//! Solid-specific extensions like `placeholder()`.
 
-pub mod constructors;
-pub mod ops_elementwise;
-pub mod ops_matmul;
-pub mod ops_reduce;
-pub mod ops_shape;
-pub mod structure;
-
-pub use structure::Tensor;
+mod placeholder;

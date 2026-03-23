@@ -47,4 +47,3 @@ pub use context::SolidContext;
 pub use fusion_policy::SolidFusionPolicy;
 pub use pass::{FusionPass, GraphPass, MemoryPlanningPass, OptimizationPass, PassManager};
 pub use program::{CompiledProgram, StaticBufferPlan, TensorSpec};
-pub use tensor::Tensor;

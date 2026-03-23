@@ -1,22 +1,28 @@
+//! Liquid-specific tensor realization (eager execution).
+
 use anyhow::{anyhow, bail, Result};
 use std::sync::Arc;
 
 use crate::core::liquid::{
-    context::SharedBufferPool,
+    context::{LiquidContext, SharedBufferPool},
     plan::{build_plan, ExecItem, ExecutionPlan, GraphSignature},
-    tensor::{
-        helpers::{clone_reachable_subgraph, is_optimize_safe},
-        Tensor,
-    },
 };
 use crate::core::shared::{
     dtype::{Buffer, RealizedTensor},
     exec,
-    graph::{Graph, NodeId},
+    graph::{Graph, NodeId, Op},
     optimize,
+    tensor::Tensor,
 };
 
-impl Tensor {
+use std::collections::{HashMap, HashSet};
+
+/// Liquid-specific extensions for tensor realization.
+impl Tensor<LiquidContext> {
+    /// Execute the computation graph and return concrete data.
+    ///
+    /// This is Liquid's eager execution capability - it JIT compiles
+    /// and runs the computation graph to produce a realized tensor.
     pub fn realize(&self) -> Result<RealizedTensor> {
         let graph_handle = self.cx.graph();
         let graph = graph_handle.lock().unwrap();
@@ -70,9 +76,95 @@ impl Tensor {
     }
 }
 
+// ==================== Helper Functions ====================
+
+fn clone_reachable_subgraph(src: &Graph, root: NodeId) -> (Graph, NodeId) {
+    let (dst, new_root, _) = clone_reachable_subgraph_with_map(src, root);
+    (dst, new_root)
+}
+
+fn clone_reachable_subgraph_with_map(
+    src: &Graph,
+    root: NodeId,
+) -> (Graph, NodeId, HashMap<NodeId, NodeId>) {
+    use crate::core::shared::graph::Node;
+
+    let mut dst = Graph::new();
+    let mut id_map = HashMap::new();
+
+    fn import_node(
+        src_graph: &Graph,
+        src_id: NodeId,
+        dst_graph: &mut Graph,
+        id_map: &mut HashMap<NodeId, NodeId>,
+    ) -> NodeId {
+        if let Some(&mapped) = id_map.get(&src_id) {
+            return mapped;
+        }
+
+        let node = src_graph.node(src_id);
+        let new_inputs: Vec<NodeId> = node
+            .inputs
+            .iter()
+            .map(|&input_id| import_node(src_graph, input_id, dst_graph, id_map))
+            .collect();
+
+        let new_id = dst_graph.add_node(Node {
+            op: node.op.clone(),
+            inputs: new_inputs,
+            shape: node.shape.clone(),
+            dtype: node.dtype,
+            buffer: node.buffer.clone(),
+        });
+
+        id_map.insert(src_id, new_id);
+        new_id
+    }
+
+    let new_root = import_node(src, root, &mut dst, &mut id_map);
+    (dst, new_root, id_map)
+}
+
+fn is_optimize_safe(graph: &Graph, root: NodeId) -> bool {
+    // Only optimize float dtypes - egglog rules use float constants.
+    if !graph.node(root).dtype.is_float() {
+        return false;
+    }
+
+    fn dfs(graph: &Graph, id: NodeId, seen: &mut HashSet<NodeId>) -> bool {
+        if !seen.insert(id) {
+            return true;
+        }
+
+        let node = graph.node(id);
+        match node.op {
+            Op::Load
+            | Op::Const(_)
+            | Op::Add
+            | Op::Sub
+            | Op::Mul
+            | Op::Div
+            | Op::Exp
+            | Op::Ln
+            | Op::Sqrt
+            | Op::Neg
+            | Op::Reshape
+            | Op::Permute(_)
+            | Op::Transpose(_, _)
+            | Op::Expand
+            | Op::Squeeze
+            | Op::Unsqueeze(_) => node.inputs.iter().all(|&inp| dfs(graph, inp, seen)),
+            _ => false,
+        }
+    }
+
+    let mut seen = HashSet::new();
+    dfs(graph, root, &mut seen)
+}
+
 /// Precompute which intermediates can be released at each plan step.
 fn compute_release_lists(plan: &ExecutionPlan) -> Vec<Vec<NodeId>> {
-    let mut last_use: std::collections::HashMap<NodeId, usize> = std::collections::HashMap::new();
+    let mut last_use: HashMap<NodeId, usize> = HashMap::new();
     for (step, item) in plan.items.iter().enumerate() {
         match item {
             ExecItem::Kernel { inputs, .. } => {
@@ -114,12 +206,9 @@ fn run_plan(plan: &ExecutionPlan, pool: &SharedBufferPool) -> Result<RealizedTen
 
     let release_at = compute_release_lists(plan);
 
-    let mut realized_buffers: std::collections::HashMap<NodeId, Buffer> =
-        std::collections::HashMap::new();
-    let mut realized_bytes: std::collections::HashMap<
-        NodeId,
-        (Vec<u8>, crate::core::shared::dtype::DType, usize),
-    > = std::collections::HashMap::new();
+    let mut realized_buffers: HashMap<NodeId, Buffer> = HashMap::new();
+    let mut realized_bytes: HashMap<NodeId, (Vec<u8>, crate::core::shared::dtype::DType, usize)> =
+        HashMap::new();
 
     for (step, item) in plan.items.iter().enumerate() {
         match item {
@@ -214,11 +303,8 @@ fn run_plan(plan: &ExecutionPlan, pool: &SharedBufferPool) -> Result<RealizedTen
 fn resolve_buffer(
     graph: &Graph,
     node_id: NodeId,
-    realized_buffers: &mut std::collections::HashMap<NodeId, Buffer>,
-    realized_bytes: &mut std::collections::HashMap<
-        NodeId,
-        (Vec<u8>, crate::core::shared::dtype::DType, usize),
-    >,
+    realized_buffers: &mut HashMap<NodeId, Buffer>,
+    realized_bytes: &mut HashMap<NodeId, (Vec<u8>, crate::core::shared::dtype::DType, usize)>,
     context: &str,
 ) -> Result<Buffer> {
     if let Some(buf) = realized_buffers.get(&node_id) {

@@ -198,12 +198,8 @@ impl CompiledProgram {
                     let input_buf = resolve_buffer(&self.graph, *input_node, &realized)?;
                     let input_shape = self.graph.node(*input_node).shape.clone();
                     let output_shape = self.graph.node(*output_node).shape.clone();
-                    let result = exec::execute_reduce_op_typed(
-                        op,
-                        &input_buf,
-                        &input_shape,
-                        &output_shape,
-                    )?;
+                    let result =
+                        exec::execute_reduce_op_typed(op, &input_buf, &input_shape, &output_shape)?;
                     realized.insert(*output_node, result);
                 }
             }

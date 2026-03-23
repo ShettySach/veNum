@@ -3,12 +3,13 @@ mod liquid_tests {
     use crate::core::liquid::schedule::{build_schedule, ScheduleItem};
     use crate::core::shared::dtype::Buffer;
     use crate::core::shared::graph::{Graph, Op};
-    use crate::{Context, Tensor};
+    use crate::core::shared::tensor::Tensor;
+    use crate::LiquidContext;
     use anyhow::Result;
 
     #[test]
     fn realize_leaf() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let data = vec![1.0, 2.0, 3.0, 4.0];
         let dt = Tensor::from_slice(&cx, &data, vec![4]);
@@ -21,7 +22,7 @@ mod liquid_tests {
 
     #[test]
     fn add_two_tensors() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![4]);
         let b = Tensor::from_slice(&cx, &[10.0, 20.0, 30.0, 40.0], vec![4]);
@@ -34,7 +35,7 @@ mod liquid_tests {
 
     #[test]
     fn mul_two_tensors() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[2.0, 3.0, 4.0, 5.0], vec![4]);
         let b = Tensor::from_slice(&cx, &[10.0, 10.0, 10.0, 10.0], vec![4]);
@@ -47,7 +48,7 @@ mod liquid_tests {
 
     #[test]
     fn sub_and_div() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[10.0, 20.0, 30.0, 40.0], vec![4]);
         let b = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![4]);
@@ -63,7 +64,7 @@ mod liquid_tests {
 
     #[test]
     fn fused_add_mul() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         // (a + b) * a should produce ONE fused kernel.
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![4]);
@@ -79,7 +80,7 @@ mod liquid_tests {
 
     #[test]
     fn unary_neg() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, -2.0, 3.0, -4.0], vec![4]);
         let result = a.neg().realize()?;
@@ -90,7 +91,7 @@ mod liquid_tests {
 
     #[test]
     fn unary_exp() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[0.0, 1.0, 2.0], vec![3]);
         let result = a.exp()?.realize()?;
@@ -102,7 +103,7 @@ mod liquid_tests {
 
     #[test]
     fn unary_ln() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.718_281_7, 7.389056], vec![3]);
         let result = a.ln()?.realize()?;
@@ -117,7 +118,7 @@ mod liquid_tests {
 
     #[test]
     fn unary_sqrt() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 4.0, 9.0, 16.0], vec![4]);
         let result = a.sqrt()?.realize()?;
@@ -128,7 +129,7 @@ mod liquid_tests {
 
     #[test]
     fn chain_fused_unary_binary() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         // exp(a) + b — should fuse into one kernel.
         let a = Tensor::from_slice(&cx, &[0.0, 0.0, 0.0], vec![3]);
@@ -143,7 +144,7 @@ mod liquid_tests {
 
     #[test]
     fn from_slice_add() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let b = Tensor::from_slice(&cx, &[10.0, 20.0, 30.0, 40.0], vec![2, 2]);
@@ -157,7 +158,7 @@ mod liquid_tests {
 
     #[test]
     fn larger_tensor() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let n = 1024;
         let a_data: Vec<f32> = (0..n).map(|i| i as f32).collect();
@@ -175,7 +176,7 @@ mod liquid_tests {
 
     #[test]
     fn deep_fusion_chain() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         // a * b + a - b should all fuse into one kernel.
         let a = Tensor::from_slice(&cx, &[2.0, 3.0, 4.0, 5.0], vec![4]);
@@ -193,7 +194,7 @@ mod liquid_tests {
 
     #[test]
     fn constant_tensor() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0], vec![3]);
         let c = Tensor::constant(&cx, 10.0, vec![3]);
@@ -207,7 +208,7 @@ mod liquid_tests {
 
     #[test]
     fn egglog_add_zero_identity() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0], vec![3]);
         let zero = Tensor::constant(&cx, 0.0, vec![3]);
@@ -219,7 +220,7 @@ mod liquid_tests {
 
     #[test]
     fn egglog_mul_one_identity() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[5.0, 10.0, 15.0], vec![3]);
         let one = Tensor::constant(&cx, 1.0, vec![3]);
@@ -231,7 +232,7 @@ mod liquid_tests {
 
     #[test]
     fn egglog_mul_zero() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[5.0, 10.0, 15.0], vec![3]);
         let zero = Tensor::constant(&cx, 0.0, vec![3]);
@@ -243,7 +244,7 @@ mod liquid_tests {
 
     #[test]
     fn egglog_double_neg() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, -2.0, 3.0], vec![3]);
         // neg(neg(a)) should be optimized to just a.
@@ -254,7 +255,7 @@ mod liquid_tests {
 
     #[test]
     fn egglog_exp_ln_inverse() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0], vec![3]);
         // exp(ln(a)) should be optimized to just a.
@@ -265,7 +266,7 @@ mod liquid_tests {
 
     #[test]
     fn egglog_sub_self() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[5.0, 10.0, 15.0], vec![3]);
         // a - a should be optimized to 0.
@@ -276,7 +277,7 @@ mod liquid_tests {
 
     #[test]
     fn egglog_shape_ops_optimize_and_execute() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         // Reshape/transpose/squeeze/unsqueeze chain should stay optimize-safe
         // and preserve values.
@@ -295,7 +296,7 @@ mod liquid_tests {
 
     #[test]
     fn forward_fusion_basic_reshape() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![4]);
         let b = Tensor::from_slice(&cx, &[10.0, 20.0, 30.0, 40.0], vec![4]);
@@ -312,7 +313,7 @@ mod liquid_tests {
 
     #[test]
     fn forward_fusion_transpose() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let b = Tensor::from_slice(&cx, &[10.0, 20.0, 30.0, 40.0], vec![2, 2]);
@@ -329,7 +330,7 @@ mod liquid_tests {
 
     #[test]
     fn forward_fusion_shape_chain() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let b = Tensor::from_slice(&cx, &[10.0, 20.0, 30.0, 40.0], vec![2, 2]);
@@ -346,7 +347,7 @@ mod liquid_tests {
 
     #[test]
     fn phase2_optimized_fused_dag_has_no_shape_barriers() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let b = Tensor::from_slice(&cx, &[10.0, 20.0, 30.0, 40.0], vec![2, 2]);
@@ -369,10 +370,10 @@ mod liquid_tests {
 
     #[test]
     fn forward_fusion_reduce_then_reshape() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
-        let y = a.sum_dims(vec![1], true)?.reshape(vec![1, 2])?;
+        let y = a.sum(&[1], true)?.reshape(vec![1, 2])?;
 
         let fused = y.render_fused_dag();
         assert!(!fused.contains("Shape Op"));
@@ -389,11 +390,11 @@ mod liquid_tests {
         let a = g.load(Buffer::from_f32_vec(vec![1.0, 2.0, 3.0, 4.0]), vec![4]);
         let b = g.load(Buffer::from_f32_vec(vec![10.0, 20.0, 30.0, 40.0]), vec![4]);
 
-        let add = g.binary(Op::Add, a, b);
+        let add = g.binary(Op::Add, a, b, vec![4]);
         let neg = g.unary(Op::Neg, add);
         let reshaped = g.reshape(add, vec![2, 2]);
         let reshaped_back = g.reshape(reshaped, vec![4]);
-        let root = g.binary(Op::Add, neg, reshaped_back);
+        let root = g.binary(Op::Add, neg, reshaped_back, vec![4]);
 
         let schedule = build_schedule(&g, root);
 
@@ -408,7 +409,7 @@ mod liquid_tests {
 
     #[test]
     fn realized_data_and_shape() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let r = a.realize()?;
@@ -420,10 +421,10 @@ mod liquid_tests {
 
     #[test]
     fn reduce_sum_dims() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
-        let r = a.sum_dims(vec![1], false)?.realize()?;
+        let r = a.sum(&[1], false)?.realize()?;
 
         assert_eq!(*r.data(), [3.0, 7.0]);
         assert_eq!(r.sizes(), &[2]);
@@ -432,10 +433,10 @@ mod liquid_tests {
 
     #[test]
     fn reduce_product_dims_keepdims() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
-        let r = a.product_dims(vec![0], true)?.realize()?;
+        let r = a.prod(&[0], true)?.realize()?;
 
         assert_eq!(*r.data(), [3.0, 8.0]);
         assert_eq!(r.sizes(), &[1, 2]);
@@ -444,10 +445,10 @@ mod liquid_tests {
 
     #[test]
     fn reduce_max_dims() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 9.0, 3.0, 4.0, 7.0, 6.0], vec![2, 3]);
-        let r = a.max_dims(vec![0], false)?.realize()?;
+        let r = a.max(&[0], false)?.realize()?;
 
         assert_eq!(*r.data(), [4.0, 9.0, 6.0]);
         assert_eq!(r.sizes(), &[3]);
@@ -456,10 +457,10 @@ mod liquid_tests {
 
     #[test]
     fn reduce_min_dims_keepdims() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 9.0, 3.0, 4.0, 7.0, 6.0], vec![2, 3]);
-        let r = a.min_dims(vec![1], true)?.realize()?;
+        let r = a.min(&[1], true)?.realize()?;
 
         assert_eq!(*r.data(), [1.0, 4.0]);
         assert_eq!(r.sizes(), &[2, 1]);
@@ -468,10 +469,10 @@ mod liquid_tests {
 
     #[test]
     fn reduce_sum_all() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
-        let r = a.sum()?.realize()?;
+        let r = a.sum_all()?.realize()?;
 
         assert_eq!(*r.data(), [10.0]);
         assert_eq!(r.sizes(), &[1, 1]);
@@ -480,10 +481,10 @@ mod liquid_tests {
 
     #[test]
     fn shape_then_reduce_sum() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
-        let r = a.reshape(vec![3, 2])?.sum_dims(vec![1], false)?.realize()?;
+        let r = a.reshape(vec![3, 2])?.sum(&[1], false)?.realize()?;
 
         assert_eq!(*r.data(), [3.0, 7.0, 11.0]);
         assert_eq!(r.sizes(), &[3]);
@@ -492,10 +493,10 @@ mod liquid_tests {
 
     #[test]
     fn reduce_then_elementwise_add() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
-        let summed = a.sum_dims(vec![1], true)?;
+        let summed = a.sum(&[1], true)?;
         let bias = Tensor::constant(&cx, 10.0, vec![2, 1]);
         let r = (&summed + &bias)?.realize()?;
 
@@ -506,10 +507,10 @@ mod liquid_tests {
 
     #[test]
     fn permute_then_reduce_keepdims() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
-        let r = a.permute(vec![1, 0])?.sum_dims(vec![1], true)?.realize()?;
+        let r = a.permute(vec![1, 0])?.sum(&[1], true)?.realize()?;
 
         assert_eq!(*r.data(), [5.0, 7.0, 9.0]);
         assert_eq!(r.sizes(), &[3, 1]);
@@ -518,13 +519,10 @@ mod liquid_tests {
 
     #[test]
     fn chained_reduce_keepdims_then_reduce() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
-        let r = a
-            .sum_dims(vec![1], true)?
-            .sum_dims(vec![0], true)?
-            .realize()?;
+        let r = a.sum(&[1], true)?.sum(&[0], true)?.realize()?;
 
         assert_eq!(*r.data(), [10.0]);
         assert_eq!(r.sizes(), &[1, 1]);
@@ -533,12 +531,12 @@ mod liquid_tests {
 
     #[test]
     fn shape_reduce_elementwise_chain() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let r = a
             .transpose(0, 1)?
-            .sum_dims(vec![1], false)?
+            .sum(&[1], false)?
             .unsqueeze(2)?
             .realize()?;
 
@@ -549,7 +547,7 @@ mod liquid_tests {
 
     #[test]
     fn matmul_2d() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         // [2,3] @ [3,2]
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
@@ -565,7 +563,7 @@ mod liquid_tests {
 
     #[test]
     fn matmul_batched() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         // [2, 2, 2] @ [2, 2] -> broadcast b to [2, 2, 2], result [2, 2, 2]
         #[rustfmt::skip]
@@ -586,7 +584,7 @@ mod liquid_tests {
 
     #[test]
     fn i32_add() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice_i32(&cx, &[1, 2, 3, 4], vec![4]);
         let b = Tensor::from_slice_i32(&cx, &[10, 20, 30, 40], vec![4]);
@@ -600,7 +598,7 @@ mod liquid_tests {
 
     #[test]
     fn i32_sub_mul_div() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice_i32(&cx, &[10, 20, 30, 40], vec![4]);
         let b = Tensor::from_slice_i32(&cx, &[1, 2, 3, 4], vec![4]);
@@ -619,7 +617,7 @@ mod liquid_tests {
 
     #[test]
     fn i32_neg() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice_i32(&cx, &[1, -2, 3, -4], vec![4]);
         let r = a.neg().realize()?;
@@ -630,7 +628,7 @@ mod liquid_tests {
 
     #[test]
     fn i64_add() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice_i64(&cx, &[100, 200, 300], vec![3]);
         let b = Tensor::from_slice_i64(&cx, &[1, 2, 3], vec![3]);
@@ -642,7 +640,7 @@ mod liquid_tests {
 
     #[test]
     fn f64_add_mul() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice_f64(&cx, &[1.0, 2.0, 3.0], vec![3]);
         let b = Tensor::from_slice_f64(&cx, &[10.0, 20.0, 30.0], vec![3]);
@@ -658,7 +656,7 @@ mod liquid_tests {
 
     #[test]
     fn f64_exp_ln() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice_f64(&cx, &[0.0, 1.0, 2.0], vec![3]);
         let r = a.exp()?.realize()?;
@@ -674,10 +672,10 @@ mod liquid_tests {
 
     #[test]
     fn i32_reduce_sum() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice_i32(&cx, &[1, 2, 3, 4], vec![2, 2]);
-        let r = a.sum_dims(vec![1], false)?.realize()?;
+        let r = a.sum(&[1], false)?.realize()?;
 
         assert_eq!(*r.data_i32(), [3, 7]);
         assert_eq!(r.sizes(), &[2]);
@@ -686,7 +684,7 @@ mod liquid_tests {
 
     #[test]
     fn i32_reshape_permute() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice_i32(&cx, &[1, 2, 3, 4, 5, 6], vec![2, 3]);
         let r = a.permute(vec![1, 0])?.realize()?;
@@ -698,7 +696,7 @@ mod liquid_tests {
 
     #[test]
     fn dtype_mismatch_errors() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice(&cx, &[1.0, 2.0], vec![2]);
         let b = Tensor::from_slice_i32(&cx, &[1, 2], vec![2]);
@@ -710,7 +708,7 @@ mod liquid_tests {
 
     #[test]
     fn int_exp_errors() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice_i32(&cx, &[1, 2, 3], vec![3]);
         assert!(a.exp().is_err());
@@ -723,7 +721,7 @@ mod liquid_tests {
     fn i32_constant_add() -> Result<()> {
         use crate::Scalar;
 
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice_i32(&cx, &[1, 2, 3], vec![3]);
         let c = Tensor::constant_scalar(&cx, Scalar::I32(10), vec![3]);
@@ -737,7 +735,7 @@ mod liquid_tests {
     fn f64_constant_add() -> Result<()> {
         use crate::Scalar;
 
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice_f64(&cx, &[1.0, 2.0, 3.0], vec![3]);
         let c = Tensor::constant_scalar(&cx, Scalar::F64(10.0), vec![3]);
@@ -749,7 +747,7 @@ mod liquid_tests {
 
     #[test]
     fn realize_leaf_i32() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         let a = Tensor::from_slice_i32(&cx, &[10, 20, 30], vec![3]);
         let r = a.realize()?;
@@ -765,7 +763,7 @@ mod liquid_tests {
     /// This test creates a diamond pattern where inputs are reused in multiple branches.
     #[test]
     fn load_node_deduplication() -> Result<()> {
-        let cx = Context::new();
+        let cx = LiquidContext::new();
 
         // Create input tensors
         let a = Tensor::from_slice(&cx, &[1.0, 2.0, 3.0, 4.0], vec![4]);

@@ -6,6 +6,7 @@ use crate::core::liquid::kernel::ExecutableKernel;
 use crate::core::liquid::lru_cache::LruCache;
 use crate::core::liquid::plan::{BufferPool, ExecutionPlan, GraphSignature};
 use crate::core::shared::graph::Graph;
+use crate::core::shared::tensor::Context;
 
 /// Cache of JIT-compiled kernels keyed by structural signature.
 pub(crate) type KernelCache = Arc<Mutex<LruCache<KernelSignature, Arc<dyn ExecutableKernel>>>>;
@@ -24,7 +25,7 @@ pub(crate) type SharedBufferPool = Arc<Mutex<BufferPool>>;
 /// structures are only compiled once, and a cache of execution plans so
 /// repeated `realize()` calls skip schedule building and kernel compilation.
 #[derive(Clone)]
-pub struct Context {
+pub struct LiquidContext {
     graph: Arc<Mutex<Graph>>,
     kernel_cache: KernelCache,
     plan_cache: PlanCache,
@@ -32,13 +33,13 @@ pub struct Context {
     backend: Arc<dyn Backend>,
 }
 
-impl Default for Context {
+impl Default for LiquidContext {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Context {
+impl LiquidContext {
     const DEFAULT_KERNEL_CACHE_CAPACITY: usize = 1000;
     const DEFAULT_PLAN_CACHE_CAPACITY: usize = 500;
 
@@ -95,5 +96,12 @@ impl Context {
 
     pub(crate) fn backend(&self) -> Arc<dyn Backend> {
         Arc::clone(&self.backend)
+    }
+}
+
+// Implement the shared Context trait for unified tensor operations
+impl Context for LiquidContext {
+    fn graph(&self) -> &Arc<Mutex<Graph>> {
+        &self.graph
     }
 }

@@ -44,8 +44,7 @@ impl Graph {
         })
     }
 
-    pub fn binary(&mut self, op: Op, lhs: NodeId, rhs: NodeId) -> NodeId {
-        let shape = self.node(lhs).shape.clone();
+    pub fn binary(&mut self, op: Op, lhs: NodeId, rhs: NodeId, shape: Vec<usize>) -> NodeId {
         let dtype = self.node(lhs).dtype;
         self.add_node(Node {
             op,
