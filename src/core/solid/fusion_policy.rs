@@ -145,6 +145,7 @@ mod tests {
 
         let mut policy = SolidFusionPolicy::new();
         policy.add_boundary(a);
+        assert!(policy.is_boundary(a));
 
         let consumer_counts = HashMap::new();
 

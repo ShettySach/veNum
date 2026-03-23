@@ -6,14 +6,12 @@ use cranelift_codegen::ir::Function;
 use cranelift_jit::JITModule;
 use cranelift_module::Module;
 
-use crate::core::lazy::schedule::ReduceKind as LazyReduceKind;
+use crate::core::liquid::schedule::ReduceKind as LazyReduceKind;
 use crate::core::shared::codegen::cranelift_setup::dtype_to_cl_type;
 use crate::core::shared::codegen::emit::{
     emit_elementwise_kernel, emit_reduce_kernel, KernelBuilderContext, KernelEmitInfo, ReduceSpec,
 };
-use crate::core::shared::codegen::generator::{
-    CodeGenerator, FusedKernel, GeneratedKernel, KernelMetadata,
-};
+use crate::core::shared::codegen::generator::{CodeGenerator, FusedKernel, GeneratedKernel};
 use crate::core::shared::codegen::math::{declare_math_funcs, declare_math_refs};
 use crate::core::shared::codegen::reduce::ReduceKind;
 use crate::core::shared::graph::Graph;
@@ -166,10 +164,6 @@ impl CodeGenerator for CpuCodeGenerator {
             function: func,
             num_inputs,
             debug_ir,
-            metadata: KernelMetadata {
-                num_inputs,
-                output_numel: kernel.numel,
-            },
         })
     }
 }

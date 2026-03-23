@@ -9,10 +9,10 @@ fn row_major_strides(shape: &[usize]) -> Vec<isize> {
     let mut strides: Vec<isize> = shape
         .iter()
         .rev()
-        .scan(1isize, |acc, &s| {
-            let v = *acc;
-            *acc *= s as isize;
-            Some(v)
+        .scan(1, |acc, &s| {
+            let stride = acc;
+            acc *= s as isize;
+            Some(stride)
         })
         .collect();
     strides.reverse();
@@ -49,7 +49,7 @@ impl ShapeTracker {
             return None;
         }
         let mut strides = self.strides.clone();
-        for (i, (&old, &new)) in self.shape.iter().zip(new_shape.iter()).enumerate() {
+        for (i, (&old, &new)) in self.shape.iter().zip(new_shape).enumerate() {
             if old == 1 && new != 1 {
                 strides[i] = 0;
             } else if old != new {

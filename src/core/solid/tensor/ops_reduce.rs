@@ -1,38 +1,39 @@
 //! Reduce operations for Solid tensors.
 
 use anyhow::{bail, Result};
+use std::collections::HashSet;
 
 use crate::core::solid::tensor::Tensor;
 
 impl Tensor {
     /// Reduce sum along specified dimensions.
     pub fn sum(&self, dims: &[isize], keepdims: bool) -> Result<Tensor> {
-        let shape = compute_reduced_shape(&self.shape, dims, keepdims)?;
         let dims_usize: Vec<usize> = normalize_axes_usize(dims, self.shape.len())?;
+        let shape = compute_reduced_shape_from_axes(&self.shape, &dims_usize, keepdims);
         let id = self.with_graph_mut(|g| g.sum(self.id, dims_usize, keepdims, shape.clone()));
         Ok(self.derived(id, shape))
     }
 
     /// Reduce product along specified dimensions.
     pub fn prod(&self, dims: &[isize], keepdims: bool) -> Result<Tensor> {
-        let shape = compute_reduced_shape(&self.shape, dims, keepdims)?;
         let dims_usize: Vec<usize> = normalize_axes_usize(dims, self.shape.len())?;
+        let shape = compute_reduced_shape_from_axes(&self.shape, &dims_usize, keepdims);
         let id = self.with_graph_mut(|g| g.prod(self.id, dims_usize, keepdims, shape.clone()));
         Ok(self.derived(id, shape))
     }
 
     /// Reduce max along specified dimensions.
     pub fn max(&self, dims: &[isize], keepdims: bool) -> Result<Tensor> {
-        let shape = compute_reduced_shape(&self.shape, dims, keepdims)?;
         let dims_usize: Vec<usize> = normalize_axes_usize(dims, self.shape.len())?;
+        let shape = compute_reduced_shape_from_axes(&self.shape, &dims_usize, keepdims);
         let id = self.with_graph_mut(|g| g.max(self.id, dims_usize, keepdims, shape.clone()));
         Ok(self.derived(id, shape))
     }
 
     /// Reduce min along specified dimensions.
     pub fn min(&self, dims: &[isize], keepdims: bool) -> Result<Tensor> {
-        let shape = compute_reduced_shape(&self.shape, dims, keepdims)?;
         let dims_usize: Vec<usize> = normalize_axes_usize(dims, self.shape.len())?;
+        let shape = compute_reduced_shape_from_axes(&self.shape, &dims_usize, keepdims);
         let id = self.with_graph_mut(|g| g.min(self.id, dims_usize, keepdims, shape.clone()));
         Ok(self.derived(id, shape))
     }
@@ -53,12 +54,11 @@ fn normalize_axes_usize(dims: &[isize], ndim: usize) -> Result<Vec<usize>> {
         .collect()
 }
 
-fn compute_reduced_shape(shape: &[usize], dims: &[isize], keepdims: bool) -> Result<Vec<usize>> {
-    let ndim = shape.len();
-    let dims_usize = normalize_axes_usize(dims, ndim)?;
-    let mut new_shape = Vec::with_capacity(ndim);
+fn compute_reduced_shape_from_axes(shape: &[usize], dims: &[usize], keepdims: bool) -> Vec<usize> {
+    let dims_set: HashSet<usize> = dims.iter().copied().collect();
+    let mut new_shape = Vec::with_capacity(shape.len());
     for (i, &s) in shape.iter().enumerate() {
-        if dims_usize.contains(&i) {
+        if dims_set.contains(&i) {
             if keepdims {
                 new_shape.push(1);
             }
@@ -69,5 +69,5 @@ fn compute_reduced_shape(shape: &[usize], dims: &[isize], keepdims: bool) -> Res
     if new_shape.is_empty() {
         new_shape.push(1);
     }
-    Ok(new_shape)
+    new_shape
 }

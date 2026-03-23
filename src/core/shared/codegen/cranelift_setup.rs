@@ -7,11 +7,14 @@ use cranelift_codegen::isa::TargetIsa;
 use crate::core::shared::dtype::DType;
 
 /// Create the Cranelift ISA for the current native platform.
-#[allow(dead_code)]
 pub fn create_native_isa() -> Result<std::sync::Arc<dyn TargetIsa>> {
     let mut flag_builder = settings::builder();
-    flag_builder.set("opt_level", "speed").unwrap();
-    flag_builder.set("is_pic", "false").unwrap();
+    flag_builder
+        .set("opt_level", "speed")
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    flag_builder
+        .set("is_pic", "false")
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
     let isa_builder = cranelift_native::builder().map_err(|e| anyhow::anyhow!("{}", e))?;
     isa_builder
         .finish(settings::Flags::new(flag_builder))

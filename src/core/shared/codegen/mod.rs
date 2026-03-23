@@ -15,7 +15,3 @@ pub mod tracker;
 // Re-exports for convenient access
 pub use cpu::CpuCodeGenerator;
 pub use generator::CodeGenerator;
-#[allow(unused_imports)]
-pub use generator::{GeneratedKernel, KernelMetadata};
-#[allow(unused_imports)]
-pub use reduce::ReduceKind;

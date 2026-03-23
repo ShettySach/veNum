@@ -1,6 +1,7 @@
 use anyhow::Result;
 use num_traits::FromPrimitive;
 use std::{
+    cmp::Ordering,
     iter::{Product, Sum},
     ops::Div,
 };
@@ -58,36 +59,52 @@ where
     where
         T: PartialOrd,
     {
-        let max = if self.is_contiguous() {
-            self.data_contiguous()
-                .iter()
-                .copied()
-                .max_by(|a, b| a.partial_cmp(b).unwrap())
+        if self.is_contiguous() {
+            let data = self.data_contiguous();
+            let mut iter = data.iter().copied();
+            let mut current_max = iter.next().ok_or(EmptyTensorError::ReduceMax)?;
+            for value in iter {
+                if let Some(Ordering::Greater) = value.partial_cmp(&current_max) {
+                    current_max = value;
+                }
+            }
+            Ok(current_max)
         } else {
-            Indexer::new(&self.shape.sizes)
-                .map(|index| self.idx(&index))
-                .max_by(|a, b| a.partial_cmp(b).unwrap())
-        };
-
-        max.ok_or(EmptyTensorError::ReduceMax.into())
+            let mut iter = Indexer::new(&self.shape.sizes).map(|index| self.idx(&index));
+            let mut current_max = iter.next().ok_or(EmptyTensorError::ReduceMax)?;
+            for value in iter {
+                if let Some(Ordering::Greater) = value.partial_cmp(&current_max) {
+                    current_max = value;
+                }
+            }
+            Ok(current_max)
+        }
     }
 
     pub fn min(&self) -> Result<T>
     where
         T: PartialOrd,
     {
-        let min = if self.is_contiguous() {
-            self.data_contiguous()
-                .iter()
-                .copied()
-                .min_by(|a, b| a.partial_cmp(b).unwrap())
+        if self.is_contiguous() {
+            let data = self.data_contiguous();
+            let mut iter = data.iter().copied();
+            let mut current_min = iter.next().ok_or(EmptyTensorError::ReduceMin)?;
+            for value in iter {
+                if let Some(Ordering::Less) = value.partial_cmp(&current_min) {
+                    current_min = value;
+                }
+            }
+            Ok(current_min)
         } else {
-            Indexer::new(&self.shape.sizes)
-                .map(|index| self.idx(&index))
-                .min_by(|a, b| a.partial_cmp(b).unwrap())
-        };
-
-        min.ok_or(EmptyTensorError::ReduceMin.into())
+            let mut iter = Indexer::new(&self.shape.sizes).map(|index| self.idx(&index));
+            let mut current_min = iter.next().ok_or(EmptyTensorError::ReduceMin)?;
+            for value in iter {
+                if let Some(Ordering::Less) = value.partial_cmp(&current_min) {
+                    current_min = value;
+                }
+            }
+            Ok(current_min)
+        }
     }
 
     pub fn sum_dims(&self, dimensions: &[usize], keepdims: bool) -> Result<NaiveTensor<T>>

@@ -128,6 +128,10 @@ impl Buffer {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn as_f32(&self) -> &[f32] {
         match self {
             Buffer::F32(v) => v,

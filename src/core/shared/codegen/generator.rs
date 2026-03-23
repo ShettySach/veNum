@@ -9,17 +9,7 @@ use crate::core::shared::graph::Graph;
 /// Forward declaration: FusedKernel is currently in lazy/schedule but will
 /// eventually be moved to shared/schedule in a future phase.
 /// For now we re-export from lazy to make it accessible.
-pub use crate::core::lazy::schedule::FusedKernel;
-
-/// Metadata about a generated kernel.
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct KernelMetadata {
-    /// Number of input buffer pointers.
-    pub num_inputs: usize,
-    /// Total elements in output.
-    pub output_numel: usize,
-}
+pub use crate::core::liquid::schedule::FusedKernel;
 
 /// Intermediate representation of a compiled kernel before finalization.
 ///
@@ -33,9 +23,6 @@ pub struct GeneratedKernel {
     pub num_inputs: usize,
     /// Debug IR if requested.
     pub debug_ir: Option<String>,
-    /// Kernel metadata.
-    #[allow(dead_code)]
-    pub metadata: KernelMetadata,
 }
 
 /// Core code generation capability shared by Liquid and Solid backends.
@@ -56,7 +43,7 @@ pub trait CodeGenerator: Send + Sync {
     /// * `capture_ir` - Whether to capture the Cranelift IR text for debugging
     ///
     /// # Returns
-    /// A `GeneratedKernel` containing the Cranelift function and metadata.
+    /// A `GeneratedKernel` containing the Cranelift function and debug info.
     ///
     /// # Note
     /// The returned `Function` contains references (`FuncRef`) to functions declared
