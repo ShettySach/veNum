@@ -5,5 +5,6 @@ pub mod lazy;
 pub mod naive;
 mod shape;
 pub mod shared;
+pub mod solid;
 mod tests;
 mod utils;

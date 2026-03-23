@@ -1,3 +1,4 @@
+pub mod codegen;
 pub mod dtype;
 pub mod exec;
 pub mod graph;

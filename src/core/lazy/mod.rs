@@ -6,7 +6,7 @@ mod kernel;
 mod lru_cache;
 mod plan;
 mod render;
-mod schedule;
+pub(crate) mod schedule;
 mod tensor;
 mod tests;
 
