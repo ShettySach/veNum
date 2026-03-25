@@ -2,86 +2,107 @@ use prettytable::{
     format::consts::FORMAT_BOX_CHARS,
     {Cell, Row, Table},
 };
-use std::{
-    any::type_name,
-    fmt::{Debug, Display, Formatter, Result},
+use std::fmt::{Debug, Display, Formatter, Result};
+
+use crate::core::shared::{
+    dtype::{Buffer, RealizedTensor},
+    tensor::{Context, Tensor},
 };
 
-use crate::{core::naive::NaiveTensor, core::shape::offset_fn};
+// ==================== Tensor<C: Context> ====================
 
-impl<T: Debug + Copy> Debug for NaiveTensor<T> {
+impl<C: Context> Debug for Tensor<C> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         f.debug_struct("Tensor")
-            .field("dtype", &type_name::<T>())
+            .field("dtype", &self.dtype())
             .field("dims", &self.rank())
             .field("elems", &self.numel())
-            .field("shape", &self.sizes())
+            .field("shape", &self.shape())
             .finish()
     }
 }
 
-impl<T: Display + Debug + Copy> Display for NaiveTensor<T> {
+// ==================== RealizedTensor ====================
+
+impl Display for RealizedTensor {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        let n = self.rank();
+        let sizes = self.sizes();
+        let n = sizes.len();
 
         if (1..=8).contains(&n) {
             let table = if n % 2 == 1 {
-                let row = odd_dimensions(self, n, 0);
+                let row = realized_odd_dimensions(self.buffer(), sizes, n, 0);
                 let table = Table::init(vec![row]);
                 set_style(table)
             } else {
-                even_dimensions(self, n, 0)
+                realized_even_dimensions(self.buffer(), sizes, n, 0)
             };
 
             write!(f, "{}", table)?;
         }
 
-        writeln!(f, "{:?}", self)
+        writeln!(
+            f,
+            "Tensor {{ dtype: {:?}, dims: {}, elems: {}, shape: {:?} }}",
+            self.dtype(),
+            n,
+            self.numel(),
+            sizes,
+        )
     }
 }
 
-fn odd_dimensions<T>(tensor: &NaiveTensor<T>, n: usize, stride_offset: usize) -> Row
-where
-    T: Copy + Display,
-{
-    let dim = tensor.rank() - n;
-    let size = tensor.shape.sizes[dim];
-    let stride = tensor.shape.strides[dim];
+fn format_buffer_element(buffer: &Buffer, index: usize) -> String {
+    match buffer {
+        Buffer::F32(v) => format!("{}", v[index]),
+        Buffer::F64(v) => format!("{}", v[index]),
+        Buffer::I32(v) => format!("{}", v[index]),
+        Buffer::I64(v) => format!("{}", v[index]),
+    }
+}
+
+fn realized_odd_dimensions(buffer: &Buffer, sizes: &[usize], n: usize, flat_offset: usize) -> Row {
+    let rank = sizes.len();
+    let dim = rank - n;
+    let size = sizes[dim];
 
     if n == 1 {
-        let offset = tensor.offset() + stride_offset;
-        Row::from((0..size).map(|index| {
-            let index = offset_fn(stride, index, size) + offset;
-            let element = tensor.data[index];
-            //let element = format!("{:.2}", element); // TODO: Handle precision without String
-            Cell::from(&element)
+        Row::from((0..size).map(|i| {
+            let s = format_buffer_element(buffer, flat_offset + i);
+            Cell::new(&s)
         }))
     } else {
-        Row::from((0..size).map(|index| {
-            let offset = offset_fn(stride, index, size) + stride_offset;
-            even_dimensions(tensor, n - 1, offset)
+        let inner_numel: usize = sizes[dim + 1..].iter().product();
+        Row::from((0..size).map(|i| {
+            let offset = flat_offset + i * inner_numel;
+            realized_even_dimensions(buffer, sizes, n - 1, offset)
         }))
     }
 }
 
-fn even_dimensions<T>(tensor: &NaiveTensor<T>, n: usize, stride_offset: usize) -> Table
-where
-    T: Copy + Display,
-{
-    let dim = tensor.rank() - n;
-    let size = tensor.shape.sizes[dim];
-    let stride = tensor.shape.strides[dim];
+fn realized_even_dimensions(
+    buffer: &Buffer,
+    sizes: &[usize],
+    n: usize,
+    flat_offset: usize,
+) -> Table {
+    let rank = sizes.len();
+    let dim = rank - n;
+    let size = sizes[dim];
+    let inner_numel: usize = sizes[dim + 1..].iter().product();
 
     let rows = (0..size)
-        .map(|index| {
-            let offset = offset_fn(stride, index, size) + stride_offset;
-            odd_dimensions(tensor, n - 1, offset)
+        .map(|i| {
+            let offset = flat_offset + i * inner_numel;
+            realized_odd_dimensions(buffer, sizes, n - 1, offset)
         })
         .collect();
 
     let table = Table::init(rows);
     set_style(table)
 }
+
+// ==================== Shared ====================
 
 fn set_style(mut table: Table) -> Table {
     table.set_format(*FORMAT_BOX_CHARS);

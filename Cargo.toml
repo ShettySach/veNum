@@ -4,10 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anyhow = "1.0.89" # result/error
-num-traits = "0.2.19" # dtype traits
-prettytable = "0.10.0" # printing
-thiserror = "1.0.64" # error definition
+anyhow = "1.0.89"
+prettytable = "0.10.0"
 cranelift = "0.116"
 cranelift-jit = "0.116"
 cranelift-module = "0.116"
@@ -16,4 +14,3 @@ cranelift-codegen = "0.116"
 egglog = "1.0.0"
 
 [dev-dependencies]
-image = "0.24.6" # examples/kernels.rs 

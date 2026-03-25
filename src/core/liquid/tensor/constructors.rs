@@ -1,10 +1,9 @@
 //! Liquid-specific tensor constructors.
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use std::cmp::Ordering;
 use std::iter::successors;
 
-use crate::core::errors::ArangeError;
 use crate::core::liquid::context::LiquidContext;
 use crate::core::shared::tensor::Tensor;
 
@@ -25,13 +24,16 @@ impl Tensor<LiquidContext> {
     /// let t = LiquidTensor::arange(&cx, 0.0, 5.0, 1.0)?;  // [0, 1, 2, 3, 4]
     /// ```
     pub fn arange(cx: &LiquidContext, start: f32, end: f32, step: f32) -> Result<Self> {
-        let ascending = match step.partial_cmp(&0.0).ok_or(ArangeError::Comparison)? {
-            Ordering::Greater if end > start => Ok(true),
-            Ordering::Less if start > end => Ok(false),
-            Ordering::Greater => Err(ArangeError::Positive),
-            Ordering::Less => Err(ArangeError::Negative),
-            Ordering::Equal => Err(ArangeError::Zero),
-        }?;
+        let ascending = match step
+            .partial_cmp(&0.0)
+            .ok_or_else(|| anyhow::anyhow!("step cannot be compared with zero"))?
+        {
+            Ordering::Greater if end > start => true,
+            Ordering::Less if start > end => false,
+            Ordering::Greater => bail!("step is positive, but start > end"),
+            Ordering::Less => bail!("step is negative, but end > start"),
+            Ordering::Equal => bail!("step size cannot be zero"),
+        };
 
         let data: Vec<_> = successors(Some(start), |&prev| {
             let curr = prev + step;

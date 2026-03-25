@@ -13,8 +13,6 @@ Vectorized _N_-dimensional numericals
 mod core;
 
 pub use core::liquid::{DType, LiquidContext, RealizedTensor, Scalar};
-pub use core::naive::NaiveTensor;
-pub use core::naive::ops::conv;
 pub use core::shared::dtype::Buffer;
 pub use core::shared::tensor::Tensor;
 pub use core::solid::{

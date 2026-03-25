@@ -1,5 +1,3 @@
-mod slicer;
-mod strider;
-pub(crate) use slicer::Slicer;
-pub(crate) use strider::Indexer;
-pub(crate) use strider::Strider;
+mod indexer;
+
+pub(crate) use indexer::Indexer;

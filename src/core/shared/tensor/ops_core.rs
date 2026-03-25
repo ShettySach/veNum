@@ -2,7 +2,7 @@
 
 use anyhow::{bail, Result};
 
-use crate::core::shape::Shape;
+use crate::core::shape::broadcast;
 use crate::core::shared::graph::Op;
 
 use super::context::Context;
@@ -24,7 +24,7 @@ impl<C: Context> Tensor<C> {
         }
 
         // Compute the broadcast shape
-        let broadcast_shape = Shape::broadcast(&self.shape, &rhs.shape)?;
+        let broadcast_shape = broadcast(&self.shape, &rhs.shape)?;
 
         // Broadcast lhs if needed
         let lhs_id = if self.shape == broadcast_shape {

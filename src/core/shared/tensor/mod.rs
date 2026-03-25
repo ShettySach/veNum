@@ -20,6 +20,7 @@
 mod constructors;
 mod context;
 mod helpers;
+mod ops_conv;
 mod ops_core;
 mod ops_elementwise;
 mod ops_matmul;
