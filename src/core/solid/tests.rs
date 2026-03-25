@@ -24,7 +24,7 @@ mod solid_tests {
     #[test]
     fn compile_and_execute_exp() -> anyhow::Result<()> {
         let cx = SolidContext::new();
-        let input = Tensor::placeholder(&cx, vec![4], DType::F32);
+        let input = Tensor::placeholder(&cx, DType::F32, vec![4]);
         let output = input.exp()?;
 
         let program = compile(&cx, &[input.id()], &[output.id()])?;
@@ -41,7 +41,7 @@ mod solid_tests {
     #[test]
     fn compile_and_execute_neg() -> anyhow::Result<()> {
         let cx = SolidContext::new();
-        let input = Tensor::placeholder(&cx, vec![3], DType::F32);
+        let input = Tensor::placeholder(&cx, DType::F32, vec![3]);
         let output = input.neg();
 
         let program = compile(&cx, &[input.id()], &[output.id()])?;
@@ -56,7 +56,7 @@ mod solid_tests {
     #[test]
     fn compile_and_execute_sqrt() -> anyhow::Result<()> {
         let cx = SolidContext::new();
-        let input = Tensor::placeholder(&cx, vec![4], DType::F32);
+        let input = Tensor::placeholder(&cx, DType::F32, vec![4]);
         let output = input.sqrt()?;
 
         let program = compile(&cx, &[input.id()], &[output.id()])?;
@@ -71,7 +71,7 @@ mod solid_tests {
     #[test]
     fn compile_and_execute_ln() -> anyhow::Result<()> {
         let cx = SolidContext::new();
-        let input = Tensor::placeholder(&cx, vec![3], DType::F32);
+        let input = Tensor::placeholder(&cx, DType::F32, vec![3]);
         let output = input.ln()?;
 
         let program = compile(&cx, &[input.id()], &[output.id()])?;
@@ -92,8 +92,8 @@ mod solid_tests {
     #[test]
     fn compile_and_execute_add() -> anyhow::Result<()> {
         let cx = SolidContext::new();
-        let a = Tensor::placeholder(&cx, vec![4], DType::F32);
-        let b = Tensor::placeholder(&cx, vec![4], DType::F32);
+        let a = Tensor::placeholder(&cx, DType::F32, vec![4]);
+        let b = Tensor::placeholder(&cx, DType::F32, vec![4]);
         let output = a.add(&b)?;
 
         let program = compile(&cx, &[a.id(), b.id()], &[output.id()])?;
@@ -109,8 +109,8 @@ mod solid_tests {
     #[test]
     fn compile_and_execute_mul() -> anyhow::Result<()> {
         let cx = SolidContext::new();
-        let a = Tensor::placeholder(&cx, vec![3], DType::F32);
-        let b = Tensor::placeholder(&cx, vec![3], DType::F32);
+        let a = Tensor::placeholder(&cx, DType::F32, vec![3]);
+        let b = Tensor::placeholder(&cx, DType::F32, vec![3]);
         let output = a.mul(&b)?;
 
         let program = compile(&cx, &[a.id(), b.id()], &[output.id()])?;
@@ -126,8 +126,8 @@ mod solid_tests {
     #[test]
     fn compile_and_execute_sub() -> anyhow::Result<()> {
         let cx = SolidContext::new();
-        let a = Tensor::placeholder(&cx, vec![3], DType::F32);
-        let b = Tensor::placeholder(&cx, vec![3], DType::F32);
+        let a = Tensor::placeholder(&cx, DType::F32, vec![3]);
+        let b = Tensor::placeholder(&cx, DType::F32, vec![3]);
         let output = a.sub(&b)?;
 
         let program = compile(&cx, &[a.id(), b.id()], &[output.id()])?;
@@ -146,7 +146,7 @@ mod solid_tests {
     fn compile_and_execute_fused_chain() -> anyhow::Result<()> {
         // input -> exp -> neg (should fuse into one kernel)
         let cx = SolidContext::new();
-        let input = Tensor::placeholder(&cx, vec![4], DType::F32);
+        let input = Tensor::placeholder(&cx, DType::F32, vec![4]);
         let output = input.exp()?.neg();
 
         let program = compile(&cx, &[input.id()], &[output.id()])?;
@@ -162,8 +162,8 @@ mod solid_tests {
     #[test]
     fn compile_and_execute_add_then_exp() -> anyhow::Result<()> {
         let cx = SolidContext::new();
-        let a = Tensor::placeholder(&cx, vec![3], DType::F32);
-        let b = Tensor::placeholder(&cx, vec![3], DType::F32);
+        let a = Tensor::placeholder(&cx, DType::F32, vec![3]);
+        let b = Tensor::placeholder(&cx, DType::F32, vec![3]);
         let output = a.add(&b)?.exp()?;
 
         let program = compile(&cx, &[a.id(), b.id()], &[output.id()])?;
@@ -182,7 +182,7 @@ mod solid_tests {
     #[test]
     fn compile_with_constant_weights() -> anyhow::Result<()> {
         let cx = SolidContext::new();
-        let input = Tensor::placeholder(&cx, vec![3], DType::F32);
+        let input = Tensor::placeholder(&cx, DType::F32, vec![3]);
         let weights = Tensor::from_slice(&cx, &[2.0, 3.0, 4.0], vec![3]);
         let output = input.mul(&weights)?;
 
@@ -200,7 +200,7 @@ mod solid_tests {
     #[test]
     fn compile_2d_exp() -> anyhow::Result<()> {
         let cx = SolidContext::new();
-        let input = Tensor::placeholder(&cx, vec![2, 3], DType::F32);
+        let input = Tensor::placeholder(&cx, DType::F32, vec![2, 3]);
         let output = input.exp()?;
 
         let program = compile(&cx, &[input.id()], &[output.id()])?;
@@ -218,7 +218,7 @@ mod solid_tests {
     #[test]
     fn compile_and_execute_reduce_sum() -> anyhow::Result<()> {
         let cx = SolidContext::new();
-        let input = Tensor::placeholder(&cx, vec![2, 3], DType::F32);
+        let input = Tensor::placeholder(&cx, DType::F32, vec![2, 3]);
         let output = input.sum(&[1], false)?;
 
         let program = compile(&cx, &[input.id()], &[output.id()])?;
@@ -236,7 +236,7 @@ mod solid_tests {
     #[test]
     fn program_can_be_executed_multiple_times() -> anyhow::Result<()> {
         let cx = SolidContext::new();
-        let input = Tensor::placeholder(&cx, vec![3], DType::F32);
+        let input = Tensor::placeholder(&cx, DType::F32, vec![3]);
         let output = input.exp()?;
 
         let program = compile(&cx, &[input.id()], &[output.id()])?;
@@ -262,7 +262,7 @@ mod solid_tests {
     #[test]
     fn execute_wrong_num_inputs_errors() -> anyhow::Result<()> {
         let cx = SolidContext::new();
-        let input = Tensor::placeholder(&cx, vec![4], DType::F32);
+        let input = Tensor::placeholder(&cx, DType::F32, vec![4]);
         let output = input.exp()?;
 
         let program = compile(&cx, &[input.id()], &[output.id()])?;
@@ -279,7 +279,7 @@ mod solid_tests {
     #[test]
     fn execute_wrong_dtype_errors() -> anyhow::Result<()> {
         let cx = SolidContext::new();
-        let input = Tensor::placeholder(&cx, vec![4], DType::F32);
+        let input = Tensor::placeholder(&cx, DType::F32, vec![4]);
         let output = input.exp()?;
 
         let program = compile(&cx, &[input.id()], &[output.id()])?;
@@ -292,7 +292,7 @@ mod solid_tests {
     #[test]
     fn execute_wrong_size_errors() -> anyhow::Result<()> {
         let cx = SolidContext::new();
-        let input = Tensor::placeholder(&cx, vec![4], DType::F32);
+        let input = Tensor::placeholder(&cx, DType::F32, vec![4]);
         let output = input.exp()?;
 
         let program = compile(&cx, &[input.id()], &[output.id()])?;
@@ -312,7 +312,7 @@ mod solid_tests {
     #[test]
     fn compile_no_outputs_errors() {
         let cx = SolidContext::new();
-        let input = Tensor::placeholder(&cx, vec![4], DType::F32);
+        let input = Tensor::placeholder(&cx, DType::F32, vec![4]);
         assert!(compile(&cx, &[input.id()], &[]).is_err());
     }
 
@@ -322,7 +322,7 @@ mod solid_tests {
     fn solid_matches_liquid_exp() -> anyhow::Result<()> {
         // Solid
         let solid_cx = SolidContext::new();
-        let solid_input = Tensor::placeholder(&solid_cx, vec![4], DType::F32);
+        let solid_input = Tensor::placeholder(&solid_cx, DType::F32, vec![4]);
         let solid_output = solid_input.exp()?;
         let program = compile(&solid_cx, &[solid_input.id()], &[solid_output.id()])?;
         let data = Buffer::from_f32_vec(vec![0.5, 1.5, 2.5, 3.5]);
@@ -341,8 +341,8 @@ mod solid_tests {
     fn solid_matches_liquid_add() -> anyhow::Result<()> {
         // Solid
         let solid_cx = SolidContext::new();
-        let a = Tensor::placeholder(&solid_cx, vec![3], DType::F32);
-        let b = Tensor::placeholder(&solid_cx, vec![3], DType::F32);
+        let a = Tensor::placeholder(&solid_cx, DType::F32, vec![3]);
+        let b = Tensor::placeholder(&solid_cx, DType::F32, vec![3]);
         let a_id = a.id();
         let b_id = b.id();
         let output = a.add(&b)?;
@@ -365,8 +365,8 @@ mod solid_tests {
     fn solid_matches_liquid_fused_chain() -> anyhow::Result<()> {
         // add -> exp
         let solid_cx = SolidContext::new();
-        let a = Tensor::placeholder(&solid_cx, vec![4], DType::F32);
-        let b = Tensor::placeholder(&solid_cx, vec![4], DType::F32);
+        let a = Tensor::placeholder(&solid_cx, DType::F32, vec![4]);
+        let b = Tensor::placeholder(&solid_cx, DType::F32, vec![4]);
         let a_id = a.id();
         let b_id = b.id();
         let output = a.add(&b)?.exp()?;
@@ -390,7 +390,7 @@ mod solid_tests {
     #[test]
     fn program_reports_metadata() -> anyhow::Result<()> {
         let cx = SolidContext::new();
-        let input = Tensor::placeholder(&cx, vec![4], DType::F32);
+        let input = Tensor::placeholder(&cx, DType::F32, vec![4]);
         let output = input.exp()?.neg();
 
         let program = compile(&cx, &[input.id()], &[output.id()])?;

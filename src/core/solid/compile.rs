@@ -3,7 +3,7 @@
 //! Takes a `SolidContext` with a built computation graph and compiles
 //! it into a `CompiledProgram` ready for execution.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::sync::Arc;
 
 use crate::core::liquid::kernel::ExecutableKernel;
@@ -30,9 +30,9 @@ use super::program::spec::TensorSpec;
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// let cx = SolidContext::new();
-/// let input = Tensor::placeholder(&cx, vec![4], DType::F32);
+/// let input = Tensor::placeholder(&cx, DType::F32, vec![4]);
 /// let output = input.exp();
 /// let program = compile(&cx, &[input.id()], &[output.id()])?;
 /// let results = program.execute(&[&input_buffer])?;

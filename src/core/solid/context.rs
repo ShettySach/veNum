@@ -15,14 +15,14 @@ use crate::core::shared::tensor::Context;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
 /// use venum::solid::{SolidContext, Tensor};
 /// use venum::DType;
 ///
 /// let cx = SolidContext::new();
 ///
 /// // Create symbolic input
-/// let input = Tensor::placeholder(&cx, vec![128, 768], DType::F32);
+/// let input = Tensor::placeholder(&cx, DType::F32, vec![128, 768]);
 ///
 /// // Build computation graph (no execution yet)
 /// let output = input.exp().sum(&[0], false)?;

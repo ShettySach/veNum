@@ -83,6 +83,37 @@ pub(super) struct KernelInputCollector<'a> {
     pub source_map: &'a mut HashMap<NodeId, NodeId>,
 }
 
+/// Recursively collect kernel inputs for a fused kernel rooted at `id`.
+///
+/// # Scheduler-Codegen Contract
+///
+/// This function establishes a contract with the codegen layer (`build_expression` in
+/// `codegen/expr.rs`) regarding which nodes are inlined vs materialized:
+///
+/// ## Inlined Nodes (added to `collector.inlined`)
+/// 1. **Constants** (`Op::Const`): Always inlined, emit constant instructions in JIT
+/// 2. **Shape-op chains**: Contiguous chains are absorbed, intermediate nodes inlined
+/// 3. **Elementwise ops**: Inlined if fusion policy permits (based on consumer count)
+///
+/// ## Materialized Nodes (added to `collector.inputs`)
+/// 1. **Non-contiguous shape-op sources**: Need tracked memory access
+/// 2. **Multi-consumer nodes** (Liquid policy): Materialized to avoid duplicate computation
+/// 3. **Load ops**: Always materialized as they represent input buffers
+/// 4. **Ops that fusion policy refuses**: Materialized as kernel inputs
+///
+/// ## Codegen Expectations
+/// The codegen layer (`build_expression`) expects:
+/// - Any node in `input_index` (derived from `inputs`) is a materialized buffer load
+/// - Any node in `shape_source_map` resolves to its source buffer
+/// - Constants are always inlined and emit const instructions
+/// - Inlined elementwise nodes recursively build expression trees
+/// - CSE memoization prevents duplicate computation for shared subexpressions
+///
+/// ## Validation
+/// If codegen encounters:
+/// - `Op::Load` not in `input_index` → Error: unmaterialized load
+/// - Unsupported op type → Error: unsupported op
+/// - Shape op not in `shape_source_map` → Handled by contiguous-only guard
 pub(super) fn collect_kernel_inputs(
     graph: &Graph,
     id: NodeId,
@@ -101,38 +132,36 @@ pub(super) fn collect_kernel_inputs(
         }
 
         // Try to absorb a shape op chain.
-        if input_node.op.is_shape_op() {
-            if let Some((source, tracker, chain)) =
+        if input_node.op.is_shape_op()
+            && let Some((source, tracker, chain)) =
                 try_build_tracker(graph, input_id, collector.consumer_counts, output_shape)
-            {
-                // Mark all shape ops in the chain as inlined and record source mapping.
-                for &shape_id in &chain {
-                    collector.inlined.insert(shape_id);
-                    collector.source_map.insert(shape_id, source);
-                }
-
-                // If the tracker is contiguous, the source's elements map 1:1
-                // to the kernel's flat iteration. Use the fusion policy to decide
-                // if the source can be inlined.
-                let can_inline_source = tracker.is_contiguous()
-                    && collector
-                        .policy
-                        .can_inline(graph, source, id, collector.consumer_counts);
-
-                if can_inline_source {
-                    collector.inlined.insert(source);
-                    collect_kernel_inputs(graph, source, collector, output_shape);
-                } else {
-                    // The source becomes a kernel input with a tracker.
-                    if collector.input_set.insert(source) {
-                        collector.inputs.push(source);
-                    }
-                    collector.trackers.insert(source, tracker);
-                }
-                continue;
+        {
+            // Mark all shape ops in the chain as inlined and record source mapping.
+            for &shape_id in &chain {
+                collector.inlined.insert(shape_id);
+                collector.source_map.insert(shape_id, source);
             }
-        }
 
+            // If the tracker is contiguous, the source's elements map 1:1
+            // to the kernel's flat iteration. Use the fusion policy to decide
+            // if the source can be inlined.
+            let can_inline_source = tracker.is_contiguous()
+                && collector
+                    .policy
+                    .can_inline(graph, source, id, collector.consumer_counts);
+
+            if can_inline_source {
+                collector.inlined.insert(source);
+                collect_kernel_inputs(graph, source, collector, output_shape);
+            } else {
+                // The source becomes a kernel input with a tracker.
+                if collector.input_set.insert(source) {
+                    collector.inputs.push(source);
+                }
+                collector.trackers.insert(source, tracker);
+            }
+            continue;
+        }
         // Use the fusion policy to decide if this node can be inlined
         let can_inline =
             collector

@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use crate::core::liquid::kernel::ExecutableKernel;
 use crate::core::shared::dtype::Buffer;
@@ -123,7 +123,9 @@ impl CompiledProgram {
             .iter()
             .enumerate()
             .filter_map(|(i, node)| {
-                if matches!(node.op, Op::Load) && node.buffer.is_none() {
+                if let Op::Load = node.op
+                    && node.buffer.is_none()
+                {
                     Some(NodeId(i))
                 } else {
                     None
@@ -235,6 +237,205 @@ impl CompiledProgram {
     /// Number of execution steps.
     pub fn num_steps(&self) -> usize {
         self.steps.len()
+    }
+
+    /// Render the compiled program's execution schedule as Mermaid flowchart code.
+    ///
+    /// Shows the optimized computation graph with fused kernels, shape operations,
+    /// and reduce operations grouped by execution step.
+    pub fn render_compiled_graph(&self) -> String {
+        use crate::core::liquid::render::labels::{node_label, op_label};
+        use std::collections::HashSet;
+
+        let mut lines = vec!["flowchart BT".to_string()];
+
+        // Track which nodes belong to which execution step
+        let mut node_to_step: HashMap<usize, usize> = HashMap::new();
+
+        for (step_idx, step) in self.steps.iter().enumerate() {
+            match step {
+                ExecutionStep::Kernel {
+                    output_node,
+                    input_nodes,
+                    ..
+                } => {
+                    // Mark the output and collect all nodes reachable from output
+                    // without crossing input boundaries
+                    node_to_step.insert(output_node.0, step_idx);
+                    collect_kernel_nodes(
+                        &self.graph,
+                        *output_node,
+                        input_nodes,
+                        &mut node_to_step,
+                        step_idx,
+                    );
+                }
+                ExecutionStep::Shape { output_node, .. } => {
+                    node_to_step.insert(output_node.0, step_idx);
+                }
+                ExecutionStep::Reduce { output_node, .. } => {
+                    node_to_step.insert(output_node.0, step_idx);
+                }
+            }
+        }
+
+        // Render each execution step as a subgraph
+        let mut kernel_idx = 0;
+        let mut shape_idx = 0;
+        let mut reduce_idx = 0;
+
+        for (step_idx, step) in self.steps.iter().enumerate() {
+            match step {
+                ExecutionStep::Kernel { .. } => {
+                    let members: Vec<usize> = node_to_step
+                        .iter()
+                        .filter(|&(_, &si)| si == step_idx)
+                        .map(|(&nid, _)| nid)
+                        .collect();
+
+                    if members.is_empty() {
+                        continue;
+                    }
+
+                    lines.push(format!(
+                        "    subgraph Kernel_{} [\"Fused Kernel {}\"]",
+                        kernel_idx, kernel_idx
+                    ));
+                    kernel_idx += 1;
+
+                    for &nid in &members {
+                        let label = node_label(&self.graph, NodeId(nid));
+                        lines.push(format!("        N{}[\"{}\"]", nid, label));
+                    }
+                    lines.push("    end".to_string());
+                }
+                ExecutionStep::Shape {
+                    op, output_node, ..
+                } => {
+                    lines.push(format!(
+                        "    subgraph Shape_{} [\"Shape Op {}\"]",
+                        shape_idx,
+                        op_label(op)
+                    ));
+                    shape_idx += 1;
+
+                    let nid = output_node.0;
+                    let label = node_label(&self.graph, NodeId(nid));
+                    lines.push(format!("        N{}[\"{}\"]", nid, label));
+                    lines.push("    end".to_string());
+                }
+                ExecutionStep::Reduce {
+                    op, output_node, ..
+                } => {
+                    lines.push(format!(
+                        "    subgraph Reduce_{} [\"Reduce Op {}\"]",
+                        reduce_idx,
+                        op_label(op)
+                    ));
+                    reduce_idx += 1;
+
+                    let nid = output_node.0;
+                    let label = node_label(&self.graph, NodeId(nid));
+                    lines.push(format!("        N{}[\"{}\"]", nid, label));
+                    lines.push("    end".to_string());
+                }
+            }
+        }
+
+        // Render leaf nodes that aren't part of any execution step
+        let scheduled_nodes: HashSet<usize> = node_to_step.keys().copied().collect();
+        let mut visited = HashSet::new();
+
+        for &output_node in &self.output_nodes {
+            render_leaf_nodes(
+                &self.graph,
+                output_node,
+                &scheduled_nodes,
+                &mut visited,
+                &mut lines,
+            );
+        }
+
+        // Render edges
+        let mut edge_visited = HashSet::new();
+        for &output_node in &self.output_nodes {
+            render_edges(&self.graph, output_node, &mut edge_visited, &mut lines);
+        }
+
+        lines.join("\n")
+    }
+}
+
+/// Recursively collect all nodes that are part of a fused kernel.
+fn collect_kernel_nodes(
+    graph: &Graph,
+    node_id: NodeId,
+    input_boundaries: &[NodeId],
+    node_to_step: &mut HashMap<usize, usize>,
+    step_idx: usize,
+) {
+    let input_set: std::collections::HashSet<NodeId> = input_boundaries.iter().copied().collect();
+
+    fn dfs(
+        graph: &Graph,
+        node_id: NodeId,
+        input_set: &std::collections::HashSet<NodeId>,
+        node_to_step: &mut HashMap<usize, usize>,
+        step_idx: usize,
+    ) {
+        let node = graph.node(node_id);
+        for &input_id in &node.inputs {
+            if input_set.contains(&input_id) {
+                continue;
+            }
+            node_to_step.insert(input_id.0, step_idx);
+            dfs(graph, input_id, input_set, node_to_step, step_idx);
+        }
+    }
+
+    dfs(graph, node_id, &input_set, node_to_step, step_idx);
+}
+
+/// Render nodes that aren't part of any execution step (typically inputs/constants).
+fn render_leaf_nodes(
+    graph: &Graph,
+    node_id: NodeId,
+    scheduled_nodes: &std::collections::HashSet<usize>,
+    visited: &mut std::collections::HashSet<usize>,
+    lines: &mut Vec<String>,
+) {
+    use crate::core::liquid::render::labels::node_label;
+
+    if !visited.insert(node_id.0) {
+        return;
+    }
+
+    if !scheduled_nodes.contains(&node_id.0) {
+        let label = node_label(graph, node_id);
+        lines.push(format!("    N{}[\"{}\"]", node_id.0, label));
+    }
+
+    let node = graph.node(node_id);
+    for &input_id in &node.inputs {
+        render_leaf_nodes(graph, input_id, scheduled_nodes, visited, lines);
+    }
+}
+
+/// Render edges between all nodes in the graph.
+fn render_edges(
+    graph: &Graph,
+    node_id: NodeId,
+    visited: &mut std::collections::HashSet<usize>,
+    lines: &mut Vec<String>,
+) {
+    if !visited.insert(node_id.0) {
+        return;
+    }
+
+    let node = graph.node(node_id);
+    for &input_id in &node.inputs {
+        render_edges(graph, input_id, visited, lines);
+        lines.push(format!("    N{} --> N{}", input_id.0, node_id.0));
     }
 }
 

@@ -28,10 +28,10 @@ impl BufferPool {
     /// Acquire a byte buffer for `numel` elements of `dtype`.
     pub fn acquire(&mut self, dtype: DType, numel: usize) -> Vec<u8> {
         let key = PoolKey { dtype, numel };
-        if let Some(stack) = self.pool.get_mut(&key) {
-            if let Some(buf) = stack.pop() {
-                return buf;
-            }
+        if let Some(stack) = self.pool.get_mut(&key)
+            && let Some(buf) = stack.pop()
+        {
+            return buf;
         }
         vec![0u8; numel * dtype.size_bytes()]
     }

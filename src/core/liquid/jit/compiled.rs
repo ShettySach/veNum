@@ -24,7 +24,8 @@ impl CompiledKernel {
     /// - `output` must be valid and point to a buffer of sufficient size.
     pub unsafe fn execute(&self, inputs_ptr: *const *const u8, output: *mut u8, numel: usize) {
         // ABI: fn(inputs: *const *const u8, out: *mut u8, n: u64)
-        let f: extern "C" fn(*const *const u8, *mut u8, u64) = std::mem::transmute(self.fn_ptr);
+        let f: extern "C" fn(*const *const u8, *mut u8, u64) =
+            unsafe { std::mem::transmute(self.fn_ptr) };
         f(inputs_ptr, output, numel as u64);
     }
 }

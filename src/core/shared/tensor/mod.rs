@@ -14,7 +14,7 @@
 //! // Solid mode
 //! use venum::solid::{SolidContext, Tensor};
 //! let cx = SolidContext::new();
-//! let a = Tensor::placeholder(&cx, vec![3], DType::F32);
+//! let a = Tensor::placeholder(&cx, DType::F32, vec![3]);
 //! ```
 
 mod constructors;

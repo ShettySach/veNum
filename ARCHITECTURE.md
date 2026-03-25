@@ -322,8 +322,8 @@ use venum::solid::{SolidContext, Tensor, compile};
 let cx = SolidContext::new();
 
 // Create symbolic inputs (placeholders)
-let input = Tensor::placeholder(&cx, vec![batch, seq, hidden], DType::F32);
-let weights = Tensor::placeholder(&cx, vec![hidden, hidden], DType::F32);
+let input = Tensor::placeholder(&cx, DType::F32, vec![batch, seq, hidden]);
+let weights = Tensor::placeholder(&cx, DType::F32, vec![hidden, hidden]);
 
 // Or load concrete data for weights
 let weights = Tensor::from_slice(&cx, &weight_data, vec![hidden, hidden]);
@@ -363,7 +363,7 @@ let c = Tensor::zeros(&liquid_cx, shape, DType::F32);
 let a = Tensor::from_slice(&solid_cx, &data, shape);
 let b = Tensor::constant(&solid_cx, 1.0, shape);
 let c = Tensor::zeros(&solid_cx, shape, DType::F32);
-let p = Tensor::placeholder(&solid_cx, shape, DType::F32);  // Solid-only
+let p = Tensor::placeholder(&solid_cx, DType::F32, shape);  // Solid-only
 ```
 
 ---
@@ -598,7 +598,7 @@ For Solid, inputs are symbolic (shape known, data provided at execution time).
 // solid/tensor/constructors.rs
 impl Tensor {
     /// Create a symbolic input placeholder (Solid-only)
-    pub fn placeholder(cx: &SolidContext, shape: Vec<usize>, dtype: DType) -> Self {
+    pub fn placeholder(cx: &SolidContext, dtype: DType, shape: Vec<usize>) -> Self {
         let graph = cx.graph();
         let id = graph.lock().unwrap().add_node(Node {
             op: Op::Load,

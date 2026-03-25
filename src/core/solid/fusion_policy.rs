@@ -7,12 +7,43 @@ use crate::core::shared::schedule::FusionPolicy;
 
 /// Solid-style fusion policy (Luminal-like).
 ///
-/// Aggressive: can inline multi-consumer nodes as long as they're not
-/// at compilation boundaries. This enables more fusion opportunities
-/// since we have whole-program visibility.
+/// ## Aggressive Fusion Strategy
 ///
-/// The policy is controlled by a set of "boundary" nodes that must
-/// materialize (symbolic inputs, outputs, large intermediate values).
+/// This policy can inline **multi-consumer elementwise nodes** as long as they're not
+/// at compilation boundaries. This enables maximum fusion with whole-program visibility.
+///
+/// ### Inlining Criteria
+/// 1. Node must be elementwise (`Op::Add`, `Op::Mul`, etc.)
+/// 2. Node and consumer must have matching numel (ensures 1:1 element mapping)
+/// 3. Node must NOT be at a boundary (symbolic inputs, outputs, large intermediates)
+/// 4. **Consumer count is ignored** - multi-consumer nodes CAN be inlined
+///
+/// ### Multi-Consumer Handling
+/// Multi-consumer nodes are **inlined and duplicated** in each consumer's expression tree:
+/// - **Pro**: No intermediate buffer allocation (reduced memory)
+/// - **Pro**: Better instruction-level parallelism in generated code
+/// - **Con**: Duplicate computation if not optimized by CSE or backend compiler
+/// - **Mitigation**: CSE memoization in `build_expression` prevents redundant IR building
+///
+/// ### Scheduler-Codegen Contract
+/// When a node passes `can_inline()`:
+/// - Scheduler adds it to `inlined` set, NOT to `input_buffers`
+/// - Codegen recursively builds its expression tree for each consumer
+/// - CSE memoization ensures shared subexpressions are computed once per kernel
+/// - Backend compiler (Cranelift) may further optimize redundant computation
+///
+/// ### Comparison with Liquid Policy
+/// - **Liquid**: Conservative, materializes multi-consumer nodes (no duplicate compute)
+/// - **Solid**: Aggressive, inlines multi-consumer nodes (duplicates compute, no extra buffers)
+/// - **Trade-off**: Memory vs compute - Solid saves memory, Liquid saves compute
+/// - **Both**: Rely on CSE memoization in codegen to avoid redundant expression building
+///
+/// ### When to Use
+/// Use Solid policy when:
+/// - Whole-program visibility is available (AOT compilation)
+/// - Memory is constrained (minimizing intermediate buffers)
+/// - Backend compiler can optimize duplicate computation
+/// - Expression trees are small (duplication overhead is low)
 pub struct SolidFusionPolicy {
     /// Nodes at compilation boundary (must materialize)
     boundary: HashSet<NodeId>,

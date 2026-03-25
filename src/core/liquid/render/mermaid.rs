@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::core::liquid::render::labels::{node_label, op_label};
-use crate::core::liquid::schedule::{build_schedule, ScheduleItem};
+use crate::core::liquid::schedule::{ScheduleItem, build_schedule};
 use crate::core::shared::graph::{Graph, NodeId};
 
 /// Render the raw DAG (before fusion) rooted at `root` as Mermaid flowchart code.
@@ -75,7 +75,7 @@ pub fn render_fused_dag(graph: &Graph, root: NodeId) -> String {
             ScheduleItem::Fused(_) => {
                 let members: Vec<usize> = node_to_kernel
                     .iter()
-                    .filter(|(_, &k)| k == si)
+                    .filter(|&(_, &k)| k == si)
                     .map(|(&n, _)| n)
                     .collect();
 

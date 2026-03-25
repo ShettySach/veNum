@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod liquid_tests {
-    use crate::core::liquid::schedule::{build_schedule, ScheduleItem};
+    use crate::LiquidContext;
+    use crate::core::liquid::schedule::{ScheduleItem, build_schedule};
     use crate::core::shared::dtype::Buffer;
     use crate::core::shared::graph::{Graph, Op};
     use crate::core::shared::tensor::Tensor;
-    use crate::LiquidContext;
     use anyhow::Result;
 
     #[test]
@@ -193,6 +193,7 @@ mod liquid_tests {
     }
 
     #[test]
+    // WARN: Fails
     fn constant_tensor() -> Result<()> {
         let cx = LiquidContext::new();
 
@@ -663,10 +664,11 @@ mod liquid_tests {
 
         let expected: Vec<f64> = [0.0f64, 1.0, 2.0].iter().map(|x| x.exp()).collect();
         let data = r.data_f64();
-        assert!(data
-            .iter()
-            .zip(expected.iter())
-            .all(|(a, b)| (a - b).abs() < 1e-10),);
+        assert!(
+            data.iter()
+                .zip(expected.iter())
+                .all(|(a, b)| (a - b).abs() < 1e-10),
+        );
         Ok(())
     }
 

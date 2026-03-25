@@ -1,4 +1,4 @@
-use venum::{compile, Buffer, DType, LiquidContext, SolidContext, Tensor};
+use venum::{Buffer, DType, LiquidContext, SolidContext, Tensor, compile};
 
 fn main() -> anyhow::Result<()> {
     // ── Liquid mode (JIT, per-tensor) ───────────────────────────────────
@@ -24,8 +24,8 @@ fn main() -> anyhow::Result<()> {
     let cx1 = SolidContext::new();
 
     // Create placeholder inputs (shapes known at compile time, data provided at runtime)
-    let x1 = Tensor::placeholder(&cx1, vec![3, 3, 2], DType::F32);
-    let y1 = Tensor::placeholder(&cx1, vec![2, 5], DType::F32);
+    let x1 = Tensor::placeholder(&cx1, DType::F32, vec![3, 3, 2]);
+    let y1 = Tensor::placeholder(&cx1, DType::F32, vec![2, 5]);
 
     // Build computation graph
     let z1 = x1.matmul(&y1)?;
@@ -35,7 +35,10 @@ fn main() -> anyhow::Result<()> {
 
     println!("Input specs: {:?}", program.input_specs);
     println!("Output specs: {:?}", program.output_specs);
-    println!("Buffer plan slots: {}\n", program.buffer_plan.slots.len());
+    println!("Compiled kernels: {}", program.num_kernels());
+    println!("Execution steps: {}\n", program.num_steps());
+
+    println!("Compiled graph:\n{}\n", program.render_compiled_graph());
 
     // Prepare input data (same as Liquid mode)
     let x_buf = Buffer::from_f32_vec((0..18).map(|i| i as f32).collect());

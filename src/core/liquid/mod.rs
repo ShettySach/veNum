@@ -5,7 +5,7 @@ mod jit;
 pub(crate) mod kernel;
 mod lru_cache;
 mod plan;
-mod render;
+pub(crate) mod render;
 pub(crate) mod schedule;
 mod tensor;
 mod tests;

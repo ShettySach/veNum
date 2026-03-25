@@ -104,7 +104,9 @@ fn discover_inputs(
         .iter()
         .enumerate()
         .filter_map(|(i, node)| {
-            if matches!(node.op, Op::Load) && node.buffer.is_none() {
+            if let Op::Load = node.op
+                && node.buffer.is_none()
+            {
                 Some(NodeId(i))
             } else {
                 None

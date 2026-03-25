@@ -96,7 +96,7 @@ impl ShapeTracker {
             .shape
             .iter()
             .zip(&self.strides)
-            .filter(|(&s, _)| s != 1)
+            .filter(|&(&s, _)| s != 1)
             .map(|(&s, &st)| (s, st))
             .unzip();
 

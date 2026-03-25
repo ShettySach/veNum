@@ -18,7 +18,7 @@ impl Tensor<SolidContext> {
     /// let cx = SolidContext::new();
     /// let input = Tensor::placeholder(&cx, vec![batch, seq_len, hidden], DType::F32);
     /// ```
-    pub fn placeholder(cx: &SolidContext, shape: Vec<usize>, dtype: DType) -> Self {
+    pub fn placeholder(cx: &SolidContext, dtype: DType, shape: Vec<usize>) -> Self {
         let graph = cx.graph();
         let id = graph.lock().unwrap().add_node(Node {
             op: Op::Load,

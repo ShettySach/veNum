@@ -18,7 +18,7 @@
 //! let cx = SolidContext::new();
 //!
 //! // Create symbolic inputs
-//! let input = Tensor::placeholder(&cx, vec![128, 768], DType::F32);
+//! let input = Tensor::placeholder(&cx, DType::F32, vec![128, 768]);
 //! let weights = Tensor::from_slice(&cx, &weight_data, vec![768, 768]);
 //!
 //! // Build computation graph

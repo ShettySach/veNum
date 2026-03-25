@@ -1,7 +1,7 @@
 use crate::core::shared::dtype::Buffer;
 use crate::core::shared::graph::{Graph, NodeId, Op};
 
-pub(super) fn op_label(op: &Op) -> &'static str {
+pub(crate) fn op_label(op: &Op) -> &'static str {
     match op {
         Op::Const(_) => "Const",
         Op::Load => "Load",
@@ -29,7 +29,7 @@ pub(super) fn op_label(op: &Op) -> &'static str {
     }
 }
 
-pub(super) fn node_label(graph: &Graph, id: NodeId) -> String {
+pub(crate) fn node_label(graph: &Graph, id: NodeId) -> String {
     let node = graph.node(id);
     let shape_str = format!("{:?}", node.shape);
     match &node.op {

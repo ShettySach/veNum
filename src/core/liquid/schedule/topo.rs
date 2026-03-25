@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::liquid::fusion_policy::LiquidFusionPolicy;
 use crate::core::liquid::schedule::fused_kernel::{
-    collect_kernel_inputs, try_build_tracker, FusedKernel, KernelInputCollector, ReduceKind,
-    ReduceOpItem, ReduceSpec, ShapeOpItem,
+    FusedKernel, KernelInputCollector, ReduceKind, ReduceOpItem, ReduceSpec, ShapeOpItem,
+    collect_kernel_inputs, try_build_tracker,
 };
 use crate::core::liquid::schedule::schedule_item::ScheduleItem;
 use crate::core::shared::graph::{Graph, NodeId, Op};
@@ -227,8 +227,8 @@ fn analyze_reduce_node(
     let node = graph.node(id);
     let expr_input = node.inputs[0];
 
-    if let Some(reduce_spec) = reduce_spec_from_op(&node.op) {
-        if let Some(plan) = try_fused_reduce(
+    if let Some(reduce_spec) = reduce_spec_from_op(&node.op)
+        && let Some(plan) = try_fused_reduce(
             graph,
             id,
             expr_input,
@@ -236,9 +236,9 @@ fn analyze_reduce_node(
             consumer_counts,
             consumers,
             policy,
-        ) {
-            return plan;
-        }
+        )
+    {
+        return plan;
     }
 
     // Fallback: interpreted reduce.
