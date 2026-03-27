@@ -77,14 +77,14 @@ fn main() -> anyhow::Result<()> {
     }
 
     // ── DAGs ─────────────────────────────────────────────────────────────
-    println!("\n═══ Liquid DAG ═══\n");
-    println!("{}", output.render_dag());
-
-    println!("═══ Liquid Optimized Fused DAG ═══\n");
-    println!("{}", output.render_optimized_fused_dag()?);
-
-    println!("═══ Solid Compiled DAG ═══\n");
-    println!("{}", program.render_compiled_graph());
+    // println!("\n═══ Liquid DAG ═══\n");
+    // println!("{}", output.render_dag());
+    //
+    // println!("═══ Liquid Optimized Fused DAG ═══\n");
+    // println!("{}", output.render_optimized_fused_dag()?);
+    //
+    // println!("═══ Solid Compiled DAG ═══\n");
+    // println!("{}", program.render_compiled_graph());
 
     Ok(())
 }

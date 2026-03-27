@@ -15,8 +15,7 @@ fn main() -> anyhow::Result<()> {
     println!("Optimized fused:\n{}\n", z.render_optimized_fused_dag()?);
 
     let result = z.realize()?;
-    println!("Result shape: {:?}", result.shape());
-    println!("Result: {:?}\n", result.data());
+    println!("{}", result);
 
     // ── Solid mode (AOT, whole-program) ─────────────────────────────────
     println!("═══ Solid (AOT) ═══\n");
