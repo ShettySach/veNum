@@ -1,10 +1,10 @@
 //! Elementwise operations for tensors.
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 
 use crate::core::graph::Op;
 
-use super::structure::Tensor;
+use crate::core::tensor::structure::Tensor;
 
 impl Tensor {
     // ==================== Binary Operations ====================

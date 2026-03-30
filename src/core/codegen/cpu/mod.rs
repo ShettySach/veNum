@@ -1,12 +1,13 @@
 //! CPU code generator implementation.
 
+pub mod backend;
+
 use anyhow::Result;
 use cranelift::prelude::*;
 use cranelift_codegen::ir::Function;
 use cranelift_jit::JITModule;
 use cranelift_module::Module;
 
-use crate::core::schedule::ReduceKind as ScheduleReduceKind;
 use crate::core::codegen::cranelift_setup::dtype_to_cl_type;
 use crate::core::codegen::emit::{
     emit_elementwise_kernel, emit_reduce_kernel, KernelBuilderContext, KernelEmitInfo, ReduceSpec,
@@ -15,6 +16,7 @@ use crate::core::codegen::generator::{CodeGenerator, FusedKernel, GeneratedKerne
 use crate::core::codegen::math::{declare_math_funcs, declare_math_refs};
 use crate::core::codegen::reduce::ReduceKind;
 use crate::core::graph::Graph;
+use crate::core::schedule::ReduceKind as ScheduleReduceKind;
 
 /// CPU code generator using Cranelift.
 ///

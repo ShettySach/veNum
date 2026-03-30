@@ -1,6 +1,6 @@
 use crate::core::dtype::{Buffer, DType};
 
-use super::{NodeId, Op};
+use super::Op;
 
 #[derive(Clone, Debug)]
 pub struct Node {
@@ -16,3 +16,6 @@ impl Node {
         self.shape.iter().product()
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct NodeId(pub usize);

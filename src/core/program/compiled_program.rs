@@ -1,6 +1,7 @@
 //! Compiled program representation and execution.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
@@ -16,6 +17,7 @@ use crate::core::graph::{Graph, NodeId, Op};
 use crate::core::kernel::ExecutableKernel;
 
 use super::buffer_plan::StaticBufferPlan;
+use super::labels::{node_label, op_label};
 use super::spec::TensorSpec;
 
 /// A single step in the compiled program's execution schedule.
@@ -351,9 +353,6 @@ impl CompiledProgram {
     /// Shows the optimized computation graph with fused kernels, shape operations,
     /// and reduce operations grouped by execution step.
     pub fn render_compiled_graph(&self) -> String {
-        use crate::core::print::labels::{node_label, op_label};
-        use std::collections::HashSet;
-
         let mut lines = vec!["flowchart BT".to_string()];
 
         // Track which nodes belong to which execution step
@@ -511,8 +510,6 @@ fn render_leaf_nodes(
     visited: &mut std::collections::HashSet<usize>,
     lines: &mut Vec<String>,
 ) {
-    use crate::core::print::labels::node_label;
-
     if !visited.insert(node_id.0) {
         return;
     }

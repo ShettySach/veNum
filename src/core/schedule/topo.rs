@@ -1,12 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::graph::{Graph, NodeId, Op};
-use crate::core::schedule::FusionPolicy;
+use crate::core::fusion_policy::FusionPolicy;
 use crate::core::schedule::fused_kernel::{
-    FusedKernel, KernelInputCollector, ReduceKind, ReduceOpItem, ReduceSpec, ShapeOpItem,
-    collect_kernel_inputs, try_build_tracker,
+    FusedKernel, KernelInputCollector, ReduceKind, ReduceOpItem, ReduceSpec, ScheduleItem,
+    ShapeOpItem, collect_kernel_inputs, try_build_tracker,
 };
-use crate::core::schedule::schedule_item::ScheduleItem;
 use crate::core::shape_tracker::ShapeTracker;
 
 fn build_input_index_map(input_buffers: &[NodeId]) -> HashMap<NodeId, usize> {

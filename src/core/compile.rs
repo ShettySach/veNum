@@ -14,7 +14,8 @@ use super::pass::manager::GraphPass;
 
 use crate::core::tensor::Context;
 
-use super::backend::{Backend, CpuBackend};
+use super::codegen::backend::Backend;
+use super::codegen::cpu::backend::CpuBackend;
 use super::pass::fusion::FusionPass;
 use super::pass::manager::PassContext;
 use super::pass::memory::MemoryPlanningPass;

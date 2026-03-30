@@ -1,9 +1,9 @@
 //! Matrix multiplication for tensors.
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 
-use super::helpers::broadcast_batch;
-use super::structure::Tensor;
+use crate::core::tensor::helpers::broadcast_batch;
+use crate::core::tensor::structure::Tensor;
 
 impl Tensor {
     /// Matrix multiplication.

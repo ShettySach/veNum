@@ -2,8 +2,8 @@
 
 use anyhow::Result;
 
-use super::helpers::{compute_reduced_shape, normalize_axes};
-use super::structure::Tensor;
+use crate::core::tensor::helpers::{compute_reduced_shape, normalize_axes};
+use crate::core::tensor::structure::Tensor;
 
 impl Tensor {
     /// Reduce sum along specified dimensions.

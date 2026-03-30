@@ -1,30 +1,19 @@
-//! Backend trait and CPU implementation.
+//! CPU backend implementation.
 
 use anyhow::Result;
 use std::sync::Arc;
 
-use crate::core::codegen::cranelift_setup::create_native_isa;
-use crate::core::codegen::{CodeGenerator, CpuCodeGenerator};
 use crate::core::graph::Graph;
 use crate::core::kernel::ExecutableKernel;
 use crate::core::schedule::FusedKernel;
 
+use super::CpuCodeGenerator;
+use crate::core::codegen::backend::Backend;
+use crate::core::codegen::cranelift_setup::create_native_isa;
+use crate::core::codegen::CodeGenerator;
+
 use cranelift_jit::JITModule;
 use cranelift_module::Module;
-
-/// Backend trait: compiles fused kernels for AOT programs.
-///
-/// Compiles all kernels needed by a program and packages
-/// them for repeated execution.
-pub(crate) trait Backend: Send + Sync {
-    /// Compile a fused kernel to executable form.
-    fn compile_kernel(
-        &self,
-        graph: &Graph,
-        kernel: &FusedKernel,
-        capture_ir: bool,
-    ) -> Result<Arc<dyn ExecutableKernel>>;
-}
 
 /// CPU backend using Cranelift JIT.
 ///

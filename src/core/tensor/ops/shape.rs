@@ -1,10 +1,10 @@
 //! Shape operations for tensors.
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 
 use crate::core::dtype::Scalar;
 
-use super::structure::Tensor;
+use crate::core::tensor::structure::Tensor;
 
 impl Tensor {
     /// Reshape the tensor to a new shape.

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::graph::{Graph, NodeId, Op};
-use crate::core::schedule::FusionPolicy;
+use crate::core::fusion_policy::FusionPolicy;
 use crate::core::shape_tracker::ShapeTracker;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -224,4 +224,12 @@ pub(super) fn try_build_tracker(
     }
 
     Some((source, tracker, chain))
+}
+
+/// An item in the execution schedule.
+#[derive(Debug)]
+pub enum ScheduleItem {
+    Fused(Box<FusedKernel>),
+    Shape(ShapeOpItem),
+    Reduce(ReduceOpItem),
 }

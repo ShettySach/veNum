@@ -1,11 +1,10 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::cmp::Ordering;
 
-use crate::core::iters::Indexer;
+use super::Indexer;
+use super::shape::idx_to_offset;
 use crate::core::dtype::Buffer;
 use crate::core::graph::Op;
-
-use super::utils::idx_to_offset;
 
 pub(crate) fn execute_reduce_op_typed(
     op: &Op,

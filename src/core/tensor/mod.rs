@@ -3,12 +3,7 @@
 mod constructors;
 mod context;
 mod helpers;
-mod ops_conv;
-mod ops_core;
-mod ops_elementwise;
-mod ops_matmul;
-mod ops_reduce;
-mod ops_shape;
+mod ops;
 mod overloads;
 mod placeholder;
 mod structure;

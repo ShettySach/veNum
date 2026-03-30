@@ -1,8 +1,8 @@
 //! Convolution operations for tensors.
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{anyhow, bail, Result};
 
-use super::structure::Tensor;
+use crate::core::tensor::structure::Tensor;
 
 impl Tensor {
     /// 2D convolution (cross-correlation) as used in CNNs.
