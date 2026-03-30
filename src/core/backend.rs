@@ -3,11 +3,11 @@
 use anyhow::Result;
 use std::sync::Arc;
 
-use crate::core::kernel::ExecutableKernel;
-use crate::core::schedule::FusedKernel;
 use crate::core::codegen::cranelift_setup::create_native_isa;
 use crate::core::codegen::{CodeGenerator, CpuCodeGenerator};
 use crate::core::graph::Graph;
+use crate::core::kernel::ExecutableKernel;
+use crate::core::schedule::FusedKernel;
 
 use cranelift_jit::JITModule;
 use cranelift_module::Module;

@@ -1,6 +1,6 @@
 //! Shape operations for tensors.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use crate::core::dtype::Scalar;
 

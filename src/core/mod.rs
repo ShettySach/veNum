@@ -1,8 +1,6 @@
 mod display;
 mod iters;
-mod shape;
 mod tests;
-mod utils;
 
 pub mod backend;
 pub mod codegen;
@@ -14,8 +12,8 @@ pub mod graph;
 pub mod kernel;
 pub mod optimize;
 pub mod pass;
+pub mod print;
 pub mod program;
-pub mod render;
 pub mod schedule;
 pub mod shape_tracker;
 pub mod tensor;

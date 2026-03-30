@@ -1,6 +1,6 @@
 //! Elementwise operations for tensors.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use crate::core::graph::Op;
 

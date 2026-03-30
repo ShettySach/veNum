@@ -1,9 +1,9 @@
 //! Core tensor operations: binary_op and unary_op.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
-use crate::core::shape::broadcast;
 use crate::core::graph::Op;
+use crate::core::shape_tracker::broadcast;
 
 use super::helpers::unsqueeze_shape;
 use super::structure::Tensor;

@@ -1,15 +1,15 @@
 //! Convolution operations for tensors.
 
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 
 use super::structure::Tensor;
 
 impl Tensor {
     /// 2D convolution (cross-correlation) as used in CNNs.
     ///
-    /// - `self` (input):  `[N, C_in, H, W]`
-    /// - `weight`:        `[C_out, C_in, kH, kW]`
-    /// - Output:          `[N, C_out, oH, oW]`
+    /// - `self` (input):  `[batch_size, channels_in, input_height, input_width]`
+    /// - `weight`:        `[channels_out, channels_in, kernel_height, kernel_width]`
+    /// - Output:          `[batch_size, channels_out, output_height, output_width]`
     pub fn conv2d(&self, weight: &Tensor) -> Result<Tensor> {
         if self.dtype != weight.dtype {
             bail!(
@@ -20,68 +20,82 @@ impl Tensor {
         }
         if self.shape.len() != 4 {
             bail!(
-                "conv2d: input must be 4D [N, C_in, H, W], got {:?}",
+                "conv2d: input must be 4D [batch_size, channels_in, input_height, input_width], got {:?}",
                 self.shape
             );
         }
         if weight.shape.len() != 4 {
             bail!(
-                "conv2d: weight must be 4D [C_out, C_in, kH, kW], got {:?}",
+                "conv2d: weight must be 4D [channels_out, channels_in, kernel_height, kernel_width], got {:?}",
                 weight.shape
             );
         }
 
-        let n = self.shape[0];
-        let c_in = self.shape[1];
-        let h = self.shape[2];
-        let w = self.shape[3];
+        let batch_size = self.shape[0];
+        let channels_in = self.shape[1];
+        let inp_height = self.shape[2];
+        let inp_width = self.shape[3];
 
-        let c_out = weight.shape[0];
-        let wc_in = weight.shape[1];
-        let kh = weight.shape[2];
-        let kw = weight.shape[3];
+        let channels_out = weight.shape[0];
+        let kernel_channels_in = weight.shape[1];
+        let kernel_height = weight.shape[2];
+        let kernel_width = weight.shape[3];
 
-        if c_in != wc_in {
+        if channels_in != kernel_channels_in {
             bail!(
                 "conv2d: input channels {} != weight channels {}",
-                c_in,
-                wc_in
+                channels_in,
+                kernel_channels_in
             );
         }
-        if kh > h || kw > w {
+        if kernel_height > inp_height || kernel_width > inp_width {
             bail!(
                 "conv2d: kernel [{}, {}] larger than input [{}, {}]",
-                kh,
-                kw,
-                h,
-                w
+                kernel_height,
+                kernel_width,
+                inp_height,
+                inp_width
             );
         }
 
-        let oh = h - kh + 1;
-        let ow = w - kw + 1;
+        let output_height = inp_height - kernel_height + 1;
+        let output_width = inp_width - kernel_width + 1;
 
-        let mut acc: Option<Tensor> = None;
+        let mut accumulator: Option<Tensor> = None;
 
-        for ki in 0..kh {
-            for kj in 0..kw {
-                let patch = self.slice(vec![(0, n), (0, c_in), (ki, ki + oh), (kj, kj + ow)])?;
-                let wslice =
-                    weight.slice(vec![(0, c_out), (0, c_in), (ki, ki + 1), (kj, kj + 1)])?;
+        for kernel_y in 0..kernel_height {
+            for kernel_x in 0..kernel_width {
+                let patch = self.slice(vec![
+                    (0, batch_size),
+                    (0, channels_in),
+                    (kernel_y, kernel_y + output_height),
+                    (kernel_x, kernel_x + output_width),
+                ])?;
+                let w_slice = weight.slice(vec![
+                    (0, channels_out),
+                    (0, channels_in),
+                    (kernel_y, kernel_y + 1),
+                    (kernel_x, kernel_x + 1),
+                ])?;
 
-                let patch = patch.reshape(vec![n, 1, c_in, oh, ow])?;
-                let wslice = wslice.reshape(vec![1, c_out, c_in, 1, 1])?;
+                let patch = patch.reshape(vec![
+                    batch_size,
+                    1,
+                    channels_in,
+                    output_height,
+                    output_width,
+                ])?;
+                let weight_slice = w_slice.reshape(vec![1, channels_out, channels_in, 1, 1])?;
 
-                let product = patch.mul(&wslice)?;
-                let summed = product.sum(&[2], false)?;
+                let prod_sum = patch.mul(&weight_slice)?.sum(&[2], false)?;
 
-                acc = Some(match acc {
-                    Some(prev) => prev.add(&summed)?,
-                    None => summed,
+                accumulator = Some(match accumulator {
+                    Some(prev) => prev.add(&prod_sum)?,
+                    None => prod_sum,
                 });
             }
         }
 
-        acc.ok_or_else(|| anyhow::anyhow!("conv2d: empty kernel"))
+        accumulator.ok_or_else(|| anyhow!("conv2d: empty kernel"))
     }
 }

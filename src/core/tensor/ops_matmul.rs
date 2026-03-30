@@ -1,6 +1,6 @@
 //! Matrix multiplication for tensors.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use super::helpers::broadcast_batch;
 use super::structure::Tensor;

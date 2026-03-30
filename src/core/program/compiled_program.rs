@@ -5,10 +5,10 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail};
 
-use crate::core::kernel::ExecutableKernel;
 use crate::core::dtype::Buffer;
 use crate::core::exec;
 use crate::core::graph::{Graph, NodeId, Op};
+use crate::core::kernel::ExecutableKernel;
 
 use super::buffer_plan::StaticBufferPlan;
 use super::spec::TensorSpec;
@@ -244,7 +244,7 @@ impl CompiledProgram {
     /// Shows the optimized computation graph with fused kernels, shape operations,
     /// and reduce operations grouped by execution step.
     pub fn render_compiled_graph(&self) -> String {
-        use crate::core::render::labels::{node_label, op_label};
+        use crate::core::print::labels::{node_label, op_label};
         use std::collections::HashSet;
 
         let mut lines = vec!["flowchart BT".to_string()];
@@ -404,7 +404,7 @@ fn render_leaf_nodes(
     visited: &mut std::collections::HashSet<usize>,
     lines: &mut Vec<String>,
 ) {
-    use crate::core::render::labels::node_label;
+    use crate::core::print::labels::node_label;
 
     if !visited.insert(node_id.0) {
         return;

@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod solid_tests {
+    use crate::core::compile::compile;
     use crate::core::dtype::{Buffer, DType};
     use crate::core::tensor::{Context, Tensor};
-    use crate::core::compile::compile;
 
     fn assert_f32_close(actual: &[f32], expected: &[f32], tol: f32) {
         assert_eq!(actual.len(), expected.len(), "length mismatch");
