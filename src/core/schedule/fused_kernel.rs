@@ -60,7 +60,6 @@ pub struct ShapeOpItem {
     pub root: NodeId,
     pub op: Op,
     pub input: NodeId,
-    pub shape: Vec<usize>,
 }
 
 /// Reduce-op barrier item.
@@ -70,7 +69,6 @@ pub struct ReduceOpItem {
     pub root: NodeId,
     pub op: Op,
     pub input: NodeId,
-    pub shape: Vec<usize>,
 }
 
 pub(super) struct KernelInputCollector<'a> {

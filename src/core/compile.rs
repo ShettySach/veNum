@@ -3,7 +3,7 @@
 //! Takes a `Context` with a built computation graph and compiles
 //! it into a `CompiledProgram` ready for execution.
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use std::sync::Arc;
 
 use crate::core::graph::{NodeId, Op};
@@ -43,7 +43,7 @@ pub fn compile(cx: &Context, inputs: &[NodeId], outputs: &[NodeId]) -> Result<Co
 }
 
 /// Compile with a specific backend.
-pub fn compile_with_backend(
+pub(crate) fn compile_with_backend(
     cx: &Context,
     inputs: &[NodeId],
     outputs: &[NodeId],
@@ -101,7 +101,7 @@ pub fn compile_with_backend(
     let ctx = opt_pass.run(ctx)?;
 
     // --- Pass 2: Fusion ---
-    let mut boundary_nodes: Vec<NodeId> = Vec::new();
+    let mut boundary_nodes: Vec<NodeId> = Vec::with_capacity(ctx.inputs.len() + ctx.outputs.len());
     boundary_nodes.extend_from_slice(&ctx.inputs);
     boundary_nodes.extend_from_slice(&ctx.outputs);
 
@@ -113,8 +113,9 @@ pub fn compile_with_backend(
     let buffer_plan = mem_pass.build_plan(&ctx);
 
     // --- Compile kernels from schedules ---
-    let mut compiled_kernels: Vec<Arc<dyn ExecutableKernel>> = Vec::new();
-    let mut execution_steps: Vec<ExecutionStep> = Vec::new();
+    let total_items: usize = fusion_result.schedules.iter().map(|s| s.len()).sum();
+    let mut compiled_kernels: Vec<Arc<dyn ExecutableKernel>> = Vec::with_capacity(total_items);
+    let mut execution_steps: Vec<ExecutionStep> = Vec::with_capacity(total_items);
 
     for schedule in &fusion_result.schedules {
         for item in schedule {

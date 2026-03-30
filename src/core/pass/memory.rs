@@ -79,7 +79,7 @@ impl MemoryPlanningPass {
             dtype: crate::core::dtype::DType,
             size: usize,
         }
-        let mut slot_states: Vec<SlotState> = Vec::new();
+        let mut slot_states: Vec<SlotState> = Vec::with_capacity(needs_slot.len());
 
         for &id in &needs_slot {
             let node = ctx.graph.node(id);
@@ -162,7 +162,7 @@ fn compute_liveness(
         .map(|(step, &id)| (id, step))
         .collect();
 
-    let mut liveness: HashMap<NodeId, (usize, usize)> = HashMap::new();
+    let mut liveness: HashMap<NodeId, (usize, usize)> = HashMap::with_capacity(topo.len());
 
     // Initialize definition step for each node
     for (step, &id) in topo.iter().enumerate() {

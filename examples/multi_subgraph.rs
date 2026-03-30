@@ -1,4 +1,4 @@
-use venum::{Buffer, Context, DType, Tensor, compile};
+use venum::{compile, Buffer, Context, DType, Tensor};
 
 fn main() -> anyhow::Result<()> {
     let cx = Context::new();
@@ -26,10 +26,10 @@ fn main() -> anyhow::Result<()> {
     let c_buf = Buffer::from_f32_vec(vec![2.0, 2.0, 2.0, 2.0]);
     let d_buf = Buffer::from_f32_vec(vec![0.5, 0.5, 0.5, 0.5]);
 
-    let results = program.execute(&[&a_buf, &b_buf, &c_buf, &d_buf])?;
+    let output = program.execute_with_metadata(&[&a_buf, &b_buf, &c_buf, &d_buf])?;
 
-    println!("Result shape: {:?}", program.output_specs[0].shape);
-    println!("Result data: {:?}", results[0].as_f32());
+    println!("Result shape: {:?}", output.shapes[0]);
+    output.print_tensor(0);
 
     Ok(())
 }

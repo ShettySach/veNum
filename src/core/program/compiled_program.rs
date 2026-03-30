@@ -5,6 +5,11 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail};
 
+use prettytable::{
+    format::consts::FORMAT_BOX_CHARS,
+    {Cell, Row, Table},
+};
+
 use crate::core::dtype::Buffer;
 use crate::core::exec;
 use crate::core::graph::{Graph, NodeId, Op};
@@ -35,6 +40,97 @@ pub enum ExecutionStep {
         input_node: NodeId,
         output_node: NodeId,
     },
+}
+
+/// Output from program execution, including metadata for display.
+pub struct Output {
+    /// Output buffers
+    pub buffers: Vec<Buffer>,
+    /// Output shapes (corresponding to program.output_specs)
+    pub shapes: Vec<Vec<usize>>,
+}
+
+impl Output {
+    /// Print the tensor at the given output index.
+    pub fn print_tensor(&self, index: usize) {
+        let buffer = &self.buffers[index];
+        let shape = &self.shapes[index];
+        print_buffer(buffer, shape);
+    }
+}
+
+fn print_buffer(buffer: &Buffer, shape: &[usize]) {
+    let n = shape.len();
+
+    if (1..=8).contains(&n) {
+        let table = if n % 2 == 1 {
+            let row = buffer_odd_dimensions(buffer, shape, n, 0);
+            let table = Table::init(vec![row]);
+            set_table_style(table)
+        } else {
+            buffer_even_dimensions(buffer, shape, n, 0)
+        };
+
+        println!("{}", table);
+    }
+
+    println!(
+        "Tensor {{ dtype: {:?}, dims: {}, elems: {}, shape: {:?} }}",
+        buffer.dtype(),
+        n,
+        buffer.len(),
+        shape,
+    )
+}
+
+fn format_buffer_element(buffer: &Buffer, index: usize) -> String {
+    match buffer {
+        Buffer::F32(v) => format!("{}", v[index]),
+        Buffer::F64(v) => format!("{}", v[index]),
+        Buffer::I32(v) => format!("{}", v[index]),
+        Buffer::I64(v) => format!("{}", v[index]),
+    }
+}
+
+fn buffer_odd_dimensions(buffer: &Buffer, sizes: &[usize], n: usize, flat_offset: usize) -> Row {
+    let rank = sizes.len();
+    let dim = rank - n;
+    let size = sizes[dim];
+
+    if n == 1 {
+        Row::from((0..size).map(|i| {
+            let s = format_buffer_element(buffer, flat_offset + i);
+            Cell::new(&s)
+        }))
+    } else {
+        let inner_numel: usize = sizes[dim + 1..].iter().product();
+        Row::from((0..size).map(|i| {
+            let offset = flat_offset + i * inner_numel;
+            buffer_even_dimensions(buffer, sizes, n - 1, offset)
+        }))
+    }
+}
+
+fn buffer_even_dimensions(buffer: &Buffer, sizes: &[usize], n: usize, flat_offset: usize) -> Table {
+    let rank = sizes.len();
+    let dim = rank - n;
+    let size = sizes[dim];
+    let inner_numel: usize = sizes[dim + 1..].iter().product();
+
+    let rows = (0..size)
+        .map(|i| {
+            let offset = flat_offset + i * inner_numel;
+            buffer_odd_dimensions(buffer, sizes, n - 1, offset)
+        })
+        .collect();
+
+    let table = Table::init(rows);
+    set_table_style(table)
+}
+
+fn set_table_style(mut table: Table) -> Table {
+    table.set_format(*FORMAT_BOX_CHARS);
+    table
 }
 
 /// A compiled program ready for execution.
@@ -227,6 +323,17 @@ impl CompiledProgram {
         }
 
         Ok(results)
+    }
+
+    /// Execute the program and return outputs with shape metadata.
+    pub fn execute_with_metadata(&self, inputs: &[&Buffer]) -> Result<Output> {
+        let buffers = self.execute(inputs)?;
+        let shapes: Vec<Vec<usize>> = self
+            .output_specs
+            .iter()
+            .map(|spec| spec.shape.clone())
+            .collect();
+        Ok(Output { buffers, shapes })
     }
 
     /// Number of compiled kernels.

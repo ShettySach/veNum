@@ -38,27 +38,22 @@ use crate::core::schedule::FusionPolicy;
 /// - Memory is constrained (minimizing intermediate buffers)
 /// - Backend compiler can optimize duplicate computation
 /// - Expression trees are small (duplication overhead is low)
-pub struct SolidFusionPolicy {
+pub(crate) struct SolidFusionPolicy {
     /// Nodes at compilation boundary (must materialize)
     boundary: HashSet<NodeId>,
 }
 
 impl SolidFusionPolicy {
     /// Create a new Solid fusion policy.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             boundary: HashSet::new(),
         }
     }
 
     /// Mark a node as a boundary (must materialize).
-    pub fn add_boundary(&mut self, node_id: NodeId) {
+    pub(crate) fn add_boundary(&mut self, node_id: NodeId) {
         self.boundary.insert(node_id);
-    }
-
-    /// Check if a node is a boundary.
-    pub fn is_boundary(&self, node_id: NodeId) -> bool {
-        self.boundary.contains(&node_id)
     }
 }
 
@@ -170,7 +165,6 @@ mod tests {
 
         let mut policy = SolidFusionPolicy::new();
         policy.add_boundary(a);
-        assert!(policy.is_boundary(a));
 
         let consumer_counts = HashMap::new();
 

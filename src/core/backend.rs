@@ -16,7 +16,7 @@ use cranelift_module::Module;
 ///
 /// Compiles all kernels needed by a program and packages
 /// them for repeated execution.
-pub trait SolidBackend: Send + Sync {
+pub(crate) trait SolidBackend: Send + Sync {
     /// Compile a fused kernel to executable form.
     fn compile_kernel(
         &self,
@@ -30,13 +30,13 @@ pub trait SolidBackend: Send + Sync {
 ///
 /// Uses the shared `CpuCodeGenerator` for IR generation, then finalizes
 /// each kernel into a standalone JIT-compiled function.
-pub struct CpuSolidBackend {
+pub(crate) struct CpuSolidBackend {
     generator: CpuCodeGenerator,
 }
 
 impl CpuSolidBackend {
     /// Create a new CPU Solid backend.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             generator: CpuCodeGenerator {},
         }
@@ -93,6 +93,7 @@ struct SolidCompiledKernel {
     num_inputs: usize,
     _module: JITModule,
     fn_ptr: *const u8,
+    #[allow(dead_code)]
     debug_ir: Option<String>,
 }
 

@@ -1,4 +1,4 @@
-use venum::{Buffer, Context, DType, Tensor, compile};
+use venum::{compile, Buffer, Context, DType, Tensor};
 
 fn main() -> anyhow::Result<()> {
     let cx = Context::new();
@@ -18,10 +18,10 @@ fn main() -> anyhow::Result<()> {
         1.0, 0.0, -1.0, 1.0, 0.0, -1.0, 1.0, 0.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
     ]);
 
-    let results = program.execute(&[&input_buf, &weight_buf])?;
+    let output_data = program.execute_with_metadata(&[&input_buf, &weight_buf])?;
 
-    println!("Output shape: {:?}", program.output_specs[0].shape);
-    println!("Result: {:?}", results[0].as_f32());
+    println!("Output shape: {:?}", output_data.shapes[0]);
+    output_data.print_tensor(0);
 
     Ok(())
 }

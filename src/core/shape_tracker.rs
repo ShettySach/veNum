@@ -149,6 +149,7 @@ impl ShapeTracker {
     }
 
     /// Compute the flat buffer index for a logical multi-dim index.
+    #[allow(dead_code)]
     pub fn index(&self, logical_idx: &[usize]) -> usize {
         let mut off = self.offset;
         for (i, &idx) in logical_idx.iter().enumerate() {

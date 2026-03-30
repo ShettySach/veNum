@@ -13,7 +13,7 @@ pub(super) struct ProgramData {
 }
 
 pub(super) fn commands() -> Vec<egglog::ast::Command> {
-    let mut cmds = Vec::new();
+    let mut cmds = Vec::with_capacity(120);
 
     // Declare TExpr and its constructors.
     cmds.push(egglog::ast::Command::Sort(
@@ -357,11 +357,12 @@ fn rewrites() -> Vec<egglog::ast::Command> {
 }
 
 pub(super) fn graph_to_actions(graph: &Graph, root: NodeId) -> ProgramData {
-    let mut memo: Vec<Option<Expr>> = vec![None; graph.nodes.len()];
-    let mut shape_ids: HashMap<Vec<usize>, i64> = HashMap::new();
-    let mut shape_table: Vec<Vec<usize>> = Vec::new();
-    let mut perm_ids: HashMap<Vec<usize>, i64> = HashMap::new();
-    let mut perm_table: Vec<Vec<usize>> = Vec::new();
+    let node_count = graph.nodes.len();
+    let mut memo: Vec<Option<Expr>> = vec![None; node_count];
+    let mut shape_ids: HashMap<Vec<usize>, i64> = HashMap::with_capacity(node_count / 4);
+    let mut shape_table: Vec<Vec<usize>> = Vec::with_capacity(node_count / 4);
+    let mut perm_ids: HashMap<Vec<usize>, i64> = HashMap::with_capacity(node_count / 8);
+    let mut perm_table: Vec<Vec<usize>> = Vec::with_capacity(node_count / 8);
 
     let root_expr = {
         let mut builder = NodeExprBuilder {
@@ -397,8 +398,8 @@ fn intern_id(
     } else {
         let id = table.len() as i64;
         let key = data.to_vec();
-        table.push(key.clone());
-        map.insert(key, id);
+        map.insert(key.clone(), id);
+        table.push(key);
         id
     }
 }
@@ -414,8 +415,8 @@ struct NodeExprBuilder<'a> {
 
 impl NodeExprBuilder<'_> {
     fn build(&mut self, id: NodeId) -> Expr {
-        if let Some(expr) = self.memo[id.0].clone() {
-            return expr;
+        if let Some(expr) = &self.memo[id.0] {
+            return expr.clone();
         }
 
         let node = self.graph.node(id);

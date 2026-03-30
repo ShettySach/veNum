@@ -24,8 +24,10 @@ impl Iterator for Indexer<'_> {
             return None;
         };
 
-        let next = self.indices.clone();
+        // Clone current indices to return (still needed, but now it's clear why)
+        let result = self.indices.clone();
 
+        // Update indices for next iteration
         for i in (0..self.sizes.len()).rev() {
             self.indices[i] += 1;
 
@@ -37,6 +39,6 @@ impl Iterator for Indexer<'_> {
         }
 
         self.current += 1;
-        Some(next)
+        Some(result)
     }
 }

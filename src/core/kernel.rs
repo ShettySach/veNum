@@ -2,6 +2,7 @@
 ///
 /// Backends may compile kernels to machine code (CPU JIT), device code (GPU),
 /// or any other representation. `ExecutionPlan` stores kernels behind this trait.
+#[allow(dead_code)]
 pub trait ExecutableKernel: Send + Sync {
     /// Number of input buffer pointers required by this kernel.
     fn num_inputs(&self) -> usize;

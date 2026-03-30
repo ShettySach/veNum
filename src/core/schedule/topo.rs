@@ -1,12 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::core::graph::{Graph, NodeId, Op};
+use crate::core::schedule::FusionPolicy;
 use crate::core::schedule::fused_kernel::{
     FusedKernel, KernelInputCollector, ReduceKind, ReduceOpItem, ReduceSpec, ShapeOpItem,
     collect_kernel_inputs, try_build_tracker,
 };
 use crate::core::schedule::schedule_item::ScheduleItem;
-use crate::core::graph::{Graph, NodeId, Op};
-use crate::core::schedule::FusionPolicy;
 use crate::core::shape_tracker::ShapeTracker;
 
 fn build_input_index_map(input_buffers: &[NodeId]) -> HashMap<NodeId, usize> {
@@ -36,7 +36,7 @@ fn build_output_tracker_chain(
     consumers: &HashMap<NodeId, Vec<NodeId>>,
 ) -> Option<(NodeId, ShapeTracker, Vec<NodeId>)> {
     let mut current = start;
-    let mut chain = Vec::new();
+    let mut chain = Vec::with_capacity(4);
 
     while *consumer_counts.get(&current).unwrap_or(&0) == 1 {
         let Some(next) = find_single_consumer(consumers, current) else {
@@ -150,7 +150,6 @@ fn analyze_shape_node(graph: &Graph, id: NodeId) -> NodePlan {
             root: id,
             op: node.op.clone(),
             input: node.inputs[0],
-            shape: node.shape.clone(),
         }),
     }
 }
@@ -162,11 +161,12 @@ fn analyze_elementwise_node(
     consumers: &HashMap<NodeId, Vec<NodeId>>,
     policy: &dyn FusionPolicy,
 ) -> NodePlan {
-    let mut absorbed = HashSet::new();
-    let mut input_buffers = Vec::new();
-    let mut input_set = HashSet::new();
-    let mut input_trackers = HashMap::new();
-    let mut shape_source_map = HashMap::new();
+    let node_count_estimate = graph.nodes.len() / 8;
+    let mut absorbed = HashSet::with_capacity(node_count_estimate);
+    let mut input_buffers = Vec::with_capacity(8);
+    let mut input_set = HashSet::with_capacity(8);
+    let mut input_trackers = HashMap::with_capacity(8);
+    let mut shape_source_map = HashMap::with_capacity(8);
     let output_shape = graph.node(id).shape.clone();
     let mut kernel_root = id;
 
@@ -247,7 +247,6 @@ fn analyze_reduce_node(
             root: id,
             op: node.op.clone(),
             input: expr_input,
-            shape: node.shape.clone(),
         }),
     }
 }
@@ -274,13 +273,14 @@ fn try_fused_reduce(
         return None;
     }
 
-    let mut absorbed = HashSet::new();
+    let node_count_estimate = graph.nodes.len() / 8;
+    let mut absorbed = HashSet::with_capacity(node_count_estimate);
     let mut kernel_root = id;
     let iter_shape = expr_node.shape.clone();
-    let mut input_buffers = Vec::new();
-    let mut input_set = HashSet::new();
-    let mut input_trackers = HashMap::new();
-    let mut shape_source_map = HashMap::new();
+    let mut input_buffers = Vec::with_capacity(8);
+    let mut input_set = HashSet::with_capacity(8);
+    let mut input_trackers = HashMap::with_capacity(8);
+    let mut shape_source_map = HashMap::with_capacity(8);
 
     match &expr_node.op {
         Op::Load => {

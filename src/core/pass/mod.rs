@@ -13,8 +13,3 @@ pub mod fusion;
 pub mod manager;
 pub mod memory;
 pub mod optimize;
-
-pub use fusion::FusionPass;
-pub use manager::{GraphPass, PassManager};
-pub use memory::MemoryPlanningPass;
-pub use optimize::OptimizationPass;
