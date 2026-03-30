@@ -4,14 +4,14 @@ use prettytable::{
 };
 use std::fmt::{Debug, Display, Formatter, Result};
 
-use crate::core::shared::{
+use crate::core::{
     dtype::{Buffer, RealizedTensor},
-    tensor::{Context, Tensor},
+    tensor::Tensor,
 };
 
-// ==================== Tensor<C: Context> ====================
+// ==================== Tensor ====================
 
-impl<C: Context> Debug for Tensor<C> {
+impl Debug for Tensor {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         f.debug_struct("Tensor")
             .field("dtype", &self.dtype())
