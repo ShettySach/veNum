@@ -1,11 +1,11 @@
-//! Fusion policy for Solid mode.
+//! Fusion policy.
 
 use std::collections::{HashMap, HashSet};
 
 use crate::core::graph::{Graph, NodeId};
 use crate::core::schedule::FusionPolicy;
 
-/// Solid-style fusion policy (Luminal-like).
+/// Default fusion policy.
 ///
 /// ## Aggressive Fusion Strategy
 ///
@@ -33,18 +33,18 @@ use crate::core::schedule::FusionPolicy;
 /// - Backend compiler (Cranelift) may further optimize redundant computation
 ///
 /// ### When to Use
-/// Use Solid policy when:
+/// Use this policy when:
 /// - Whole-program visibility is available (AOT compilation)
 /// - Memory is constrained (minimizing intermediate buffers)
 /// - Backend compiler can optimize duplicate computation
 /// - Expression trees are small (duplication overhead is low)
-pub(crate) struct SolidFusionPolicy {
+pub(crate) struct DefaultFusionPolicy {
     /// Nodes at compilation boundary (must materialize)
     boundary: HashSet<NodeId>,
 }
 
-impl SolidFusionPolicy {
-    /// Create a new Solid fusion policy.
+impl DefaultFusionPolicy {
+    /// Create a new fusion policy.
     pub(crate) fn new() -> Self {
         Self {
             boundary: HashSet::new(),
@@ -57,13 +57,13 @@ impl SolidFusionPolicy {
     }
 }
 
-impl Default for SolidFusionPolicy {
+impl Default for DefaultFusionPolicy {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl FusionPolicy for SolidFusionPolicy {
+impl FusionPolicy for DefaultFusionPolicy {
     fn can_inline(
         &self,
         graph: &Graph,
@@ -96,7 +96,7 @@ mod tests {
     use crate::core::graph::{Node, Op};
 
     #[test]
-    fn solid_policy_allows_multi_consumer() {
+    fn policy_allows_multi_consumer() {
         let mut graph = Graph::new();
 
         // Create a graph with an elementwise node consumed multiple times
@@ -135,16 +135,16 @@ mod tests {
             buffer: None,
         });
 
-        let policy = SolidFusionPolicy::new();
+        let policy = DefaultFusionPolicy::new();
         let mut consumer_counts = HashMap::new();
         consumer_counts.insert(a, 2); // a has 2 consumers (b and c)
 
-        // Solid policy should allow inlining multi-consumer elementwise node
+        // Policy should allow inlining multi-consumer elementwise node
         assert!(policy.can_inline(&graph, a, b, &consumer_counts));
     }
 
     #[test]
-    fn solid_policy_respects_boundaries() {
+    fn policy_respects_boundaries() {
         let mut graph = Graph::new();
 
         let a = graph.add_node(Node {
@@ -163,7 +163,7 @@ mod tests {
             buffer: None,
         });
 
-        let mut policy = SolidFusionPolicy::new();
+        let mut policy = DefaultFusionPolicy::new();
         policy.add_boundary(a);
 
         let consumer_counts = HashMap::new();

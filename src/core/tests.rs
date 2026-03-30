@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod solid_tests {
+mod compile_tests {
     use crate::core::compile::compile;
     use crate::core::dtype::{Buffer, DType};
     use crate::core::tensor::{Context, Tensor};

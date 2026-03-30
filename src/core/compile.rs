@@ -1,4 +1,4 @@
-//! Compile entry point for Solid mode.
+//! Compile entry point.
 //!
 //! Takes a `Context` with a built computation graph and compiles
 //! it into a `CompiledProgram` ready for execution.
@@ -14,7 +14,7 @@ use super::pass::manager::GraphPass;
 
 use crate::core::tensor::Context;
 
-use super::backend::{CpuSolidBackend, SolidBackend};
+use super::backend::{Backend, CpuBackend};
 use super::pass::fusion::FusionPass;
 use super::pass::manager::PassContext;
 use super::pass::memory::MemoryPlanningPass;
@@ -22,10 +22,10 @@ use super::pass::optimize::OptimizationPass;
 use super::program::compiled_program::{CompiledProgram, ExecutionStep};
 use super::program::spec::TensorSpec;
 
-/// Compile a Solid context into an executable program.
+/// Compile a context into an executable program.
 ///
 /// # Arguments
-/// * `cx` - The Solid context containing the computation graph
+/// * `cx` - The context containing the computation graph
 /// * `inputs` - Input (placeholder) node IDs
 /// * `outputs` - Output (result) node IDs
 ///
@@ -39,7 +39,7 @@ use super::program::spec::TensorSpec;
 /// let results = program.execute(&[&input_buffer])?;
 /// ```
 pub fn compile(cx: &Context, inputs: &[NodeId], outputs: &[NodeId]) -> Result<CompiledProgram> {
-    compile_with_backend(cx, inputs, outputs, &CpuSolidBackend::new())
+    compile_with_backend(cx, inputs, outputs, &CpuBackend::new())
 }
 
 /// Compile with a specific backend.
@@ -47,7 +47,7 @@ pub(crate) fn compile_with_backend(
     cx: &Context,
     inputs: &[NodeId],
     outputs: &[NodeId],
-    backend: &dyn SolidBackend,
+    backend: &dyn Backend,
 ) -> Result<CompiledProgram> {
     if inputs.is_empty() {
         bail!("compile requires at least one input");

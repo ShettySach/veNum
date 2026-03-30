@@ -1,13 +1,13 @@
-//! Global fusion pass for Solid mode.
+//! Global fusion pass.
 //!
-//! Uses the shared scheduling infrastructure with `SolidFusionPolicy`
+//! Uses the shared scheduling infrastructure with `DefaultFusionPolicy`
 //! to produce a schedule of fused kernels for the entire program.
 
 use anyhow::Result;
 
-use crate::core::schedule::{build_schedule_with_policy, ScheduleItem};
+use crate::core::fusion_policy::DefaultFusionPolicy;
 use crate::core::graph::NodeId;
-use crate::core::fusion_policy::SolidFusionPolicy;
+use crate::core::schedule::{build_schedule_with_policy, ScheduleItem};
 
 use super::manager::{GraphPass, PassContext};
 
@@ -19,7 +19,7 @@ pub struct FusionResult {
 
 /// Global kernel fusion pass.
 ///
-/// Applies the `SolidFusionPolicy` to produce fused kernel schedules.
+/// Applies the `DefaultFusionPolicy` to produce fused kernel schedules.
 /// The policy aggressively inlines multi-consumer nodes, allowing
 /// inlining since we have whole-program visibility.
 pub struct FusionPass {
@@ -37,7 +37,7 @@ impl FusionPass {
 
     /// Build schedules for all output roots.
     pub fn build_schedules(&self, ctx: &PassContext) -> FusionResult {
-        let mut policy = SolidFusionPolicy::new();
+        let mut policy = DefaultFusionPolicy::new();
         for &node_id in &self.boundary_nodes {
             policy.add_boundary(node_id);
         }

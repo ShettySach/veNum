@@ -44,7 +44,7 @@
 //! - Maintains `memo: HashMap<NodeId, Value>` cache
 //! - Before computing, checks if node already evaluated
 //! - After computing, caches result for future lookups
-//! - Critical for Solid policy which inlines multi-consumer nodes
+//! - Critical for the default fusion policy which inlines multi-consumer nodes
 //!
 //! ### Error Cases (Contract Violations)
 //!

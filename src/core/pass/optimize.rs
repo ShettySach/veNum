@@ -11,7 +11,7 @@ use super::manager::{GraphPass, PassContext};
 
 /// Optimization pass using egglog equality saturation.
 ///
-/// Wraps the shared `optimize` function to run as a Solid compiler pass.
+/// Wraps the shared `optimize` function to run as a compiler pass.
 /// Applied per output root, replacing the graph with the optimized version.
 /// Skips roots containing ops not modeled in egglog (reduces, slices, etc.).
 pub struct OptimizationPass;

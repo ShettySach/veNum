@@ -1,4 +1,4 @@
-//! Solid backend trait and CPU implementation.
+//! Backend trait and CPU implementation.
 
 use anyhow::Result;
 use std::sync::Arc;
@@ -16,7 +16,7 @@ use cranelift_module::Module;
 ///
 /// Compiles all kernels needed by a program and packages
 /// them for repeated execution.
-pub(crate) trait SolidBackend: Send + Sync {
+pub(crate) trait Backend: Send + Sync {
     /// Compile a fused kernel to executable form.
     fn compile_kernel(
         &self,
@@ -26,16 +26,16 @@ pub(crate) trait SolidBackend: Send + Sync {
     ) -> Result<Arc<dyn ExecutableKernel>>;
 }
 
-/// CPU Solid backend using Cranelift JIT.
+/// CPU backend using Cranelift JIT.
 ///
 /// Uses the shared `CpuCodeGenerator` for IR generation, then finalizes
 /// each kernel into a standalone JIT-compiled function.
-pub(crate) struct CpuSolidBackend {
+pub(crate) struct CpuBackend {
     generator: CpuCodeGenerator,
 }
 
-impl CpuSolidBackend {
-    /// Create a new CPU Solid backend.
+impl CpuBackend {
+    /// Create a new CPU backend.
     pub(crate) fn new() -> Self {
         Self {
             generator: CpuCodeGenerator {},
@@ -43,13 +43,13 @@ impl CpuSolidBackend {
     }
 }
 
-impl Default for CpuSolidBackend {
+impl Default for CpuBackend {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl SolidBackend for CpuSolidBackend {
+impl Backend for CpuBackend {
     fn compile_kernel(
         &self,
         graph: &Graph,
@@ -79,7 +79,7 @@ impl SolidBackend for CpuSolidBackend {
 
         let fn_ptr = module.get_finalized_function(func_id);
 
-        Ok(Arc::new(SolidCompiledKernel {
+        Ok(Arc::new(CompiledKernel {
             num_inputs: generated.num_inputs,
             _module: module,
             fn_ptr,
@@ -88,8 +88,8 @@ impl SolidBackend for CpuSolidBackend {
     }
 }
 
-/// A compiled kernel owned by a Solid program.
-struct SolidCompiledKernel {
+/// A compiled kernel owned by a program.
+struct CompiledKernel {
     num_inputs: usize,
     _module: JITModule,
     fn_ptr: *const u8,
@@ -99,10 +99,10 @@ struct SolidCompiledKernel {
 
 // Safety: The compiled code is immutable once created and the function pointer
 // is valid for the lifetime of _module.
-unsafe impl Send for SolidCompiledKernel {}
-unsafe impl Sync for SolidCompiledKernel {}
+unsafe impl Send for CompiledKernel {}
+unsafe impl Sync for CompiledKernel {}
 
-impl ExecutableKernel for SolidCompiledKernel {
+impl ExecutableKernel for CompiledKernel {
     fn num_inputs(&self) -> usize {
         self.num_inputs
     }

@@ -1,4 +1,4 @@
-//! Memory planning pass for Solid mode.
+//! Memory planning pass.
 //!
 //! Performs liveness analysis and static buffer allocation using
 //! greedy slot assignment with buffer reuse for non-overlapping lifetimes.
