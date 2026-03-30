@@ -1,0 +1,1 @@
+- Interning symbolic shape strings and other such micro optimizations.
