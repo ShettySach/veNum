@@ -11,6 +11,7 @@ Vectorized _N_-dimensional numericals
 */
 
 mod core;
+mod print;
 
 pub use core::compile::{compile, SearchConfig};
 pub use core::cpu::{Buffer, CpuCodeGenerator, CpuModule};

@@ -100,31 +100,7 @@ fn eval_node(
 }
 
 fn op_inputs(op: &Op) -> Vec<NodeId> {
-    match op {
-        Op::Const { .. } | Op::Load { .. } => vec![],
-        Op::Store { value, .. } => vec![*value],
-        Op::Neg(a)
-        | Op::Recip(a)
-        | Op::Exp(a)
-        | Op::Log(a)
-        | Op::Sqrt(a)
-        | Op::Sin(a)
-        | Op::Cos(a) => vec![*a],
-        Op::Cast { input, .. }
-        | Op::Reshape { input, .. }
-        | Op::Permute { input, .. }
-        | Op::Slice { input, .. }
-        | Op::Expand { input, .. }
-        | Op::Reduce { input, .. } => vec![*input],
-        Op::Add(a, b) | Op::Mul(a, b) | Op::Max(a, b) | Op::Min(a, b) => vec![*a, *b],
-        Op::Cmp { lhs, rhs, .. } => vec![*lhs, *rhs],
-        Op::Where {
-            cond,
-            then_val,
-            else_val,
-        } => vec![*cond, *then_val, *else_val],
-        Op::Concat { inputs, .. } => inputs.clone(),
-    }
+    op.inputs()
 }
 
 #[derive(Clone, Debug)]
@@ -305,7 +281,10 @@ fn dims_to_shape(dims: &[Dim]) -> Result<Vec<usize>> {
     dims.iter()
         .map(|d| match d {
             Dim::Const(v) => usize::try_from(*v).map_err(|_| anyhow::anyhow!("invalid dim {v}")),
-            Dim::Sym(s) => Err(anyhow::anyhow!("runtime does not support symbolic dims (Sym({}))", s.0)),
+            Dim::Sym(s) => Err(anyhow::anyhow!(
+                "runtime does not support symbolic dims (Sym({}))",
+                s.0
+            )),
             Dim::Add(a, b) => {
                 let av = dims_to_shape(std::slice::from_ref(a))?;
                 let bv = dims_to_shape(std::slice::from_ref(b))?;

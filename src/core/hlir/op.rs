@@ -91,3 +91,61 @@ pub enum Op {
         axis: usize,
     },
 }
+
+impl Op {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Op::Const { .. } => "Const",
+            Op::Load { .. } => "Load",
+            Op::Store { .. } => "Store",
+            Op::Neg(_) => "Neg",
+            Op::Recip(_) => "Recip",
+            Op::Exp(_) => "Exp",
+            Op::Log(_) => "Log",
+            Op::Sqrt(_) => "Sqrt",
+            Op::Sin(_) => "Sin",
+            Op::Cos(_) => "Cos",
+            Op::Cast { .. } => "Cast",
+            Op::Add(_, _) => "Add",
+            Op::Mul(_, _) => "Mul",
+            Op::Max(_, _) => "Max",
+            Op::Min(_, _) => "Min",
+            Op::Cmp { .. } => "Cmp",
+            Op::Where { .. } => "Where",
+            Op::Reduce { .. } => "Reduce",
+            Op::Reshape { .. } => "Reshape",
+            Op::Permute { .. } => "Permute",
+            Op::Slice { .. } => "Slice",
+            Op::Expand { .. } => "Expand",
+            Op::Concat { .. } => "Concat",
+        }
+    }
+
+    pub fn inputs(&self) -> Vec<NodeId> {
+        match self {
+            Op::Const { .. } | Op::Load { .. } => vec![],
+            Op::Store { value, .. } => vec![*value],
+            Op::Neg(a)
+            | Op::Recip(a)
+            | Op::Exp(a)
+            | Op::Log(a)
+            | Op::Sqrt(a)
+            | Op::Sin(a)
+            | Op::Cos(a) => vec![*a],
+            Op::Cast { input, .. }
+            | Op::Reduce { input, .. }
+            | Op::Reshape { input, .. }
+            | Op::Permute { input, .. }
+            | Op::Slice { input, .. }
+            | Op::Expand { input, .. } => vec![*input],
+            Op::Add(a, b) | Op::Mul(a, b) | Op::Max(a, b) | Op::Min(a, b) => vec![*a, *b],
+            Op::Cmp { lhs, rhs, .. } => vec![*lhs, *rhs],
+            Op::Where {
+                cond,
+                then_val,
+                else_val,
+            } => vec![*cond, *then_val, *else_val],
+            Op::Concat { inputs, .. } => inputs.clone(),
+        }
+    }
+}

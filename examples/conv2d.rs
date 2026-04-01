@@ -1,4 +1,4 @@
-use venum::{Buffer, Context, DType, Tensor, run_context};
+use venum::{run_context, Buffer, Context, DType, Tensor};
 
 fn main() -> anyhow::Result<()> {
     let cx = Context::new();
@@ -19,6 +19,11 @@ fn main() -> anyhow::Result<()> {
     println!("conv2d output: {:?}", out[0]);
 
     println!("graph nodes: {}", cx.num_nodes());
+    println!("\nMermaid graph:\n{}", cx.graph_mermaid());
+    println!(
+        "\nOptimized Mermaid graph:\n{}",
+        cx.optimized_graph_mermaid()
+    );
 
     Ok(())
 }

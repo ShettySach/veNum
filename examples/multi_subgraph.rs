@@ -3,10 +3,10 @@ use venum::{run_context, Buffer, Context, DType, Tensor};
 fn main() -> anyhow::Result<()> {
     let cx = Context::new();
 
-    let a = Tensor::placeholder(&cx, DType::F32, vec![1, 4]);
-    let b = Tensor::placeholder(&cx, DType::F32, vec![1, 4]);
-    let c = Tensor::placeholder(&cx, DType::F32, vec![4, 1]);
-    let d = Tensor::placeholder(&cx, DType::F32, vec![4, 1]);
+    let a = Tensor::placeholder(&cx, DType::F32, vec![4, 1]).reshape(vec![2, 2])?;
+    let b = Tensor::placeholder(&cx, DType::F32, vec![4, 1]).reshape(vec![2, 2])?;
+    let c = Tensor::placeholder(&cx, DType::F32, vec![4, 1]).reshape(vec![2, 2])?;
+    let d = Tensor::placeholder(&cx, DType::F32, vec![4, 1]).reshape(vec![2, 2])?;
 
     let w = a.mul(&b)?.add(&a)?;
     let x = c.mul(&d)?.sub(&c)?;
@@ -24,6 +24,11 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     println!("multi-subgraph graph nodes: {}", cx.num_nodes());
+    println!("\nMermaid graph:\n{}", cx.graph_mermaid());
+    println!(
+        "\nOptimized Mermaid graph:\n{}",
+        cx.optimized_graph_mermaid()
+    );
     match &out[0] {
         Buffer::F32(v) => println!("result: {:?}", v),
         _ => println!("unexpected output dtype"),

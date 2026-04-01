@@ -37,14 +37,14 @@ impl Tensor {
         let k = a_shape[a_shape.len() - 1]
             .as_const()
             .ok_or_else(|| anyhow!("matmul currently requires constant dimensions"))?;
-        let k2 = b_shape[b_shape.len() - 2]
+        let k_ = b_shape[b_shape.len() - 2]
             .as_const()
             .ok_or_else(|| anyhow!("matmul currently requires constant dimensions"))?;
         let n = b_shape[b_shape.len() - 1]
             .as_const()
             .ok_or_else(|| anyhow!("matmul currently requires constant dimensions"))?;
 
-        if k != k2 {
+        if k != k_ {
             bail!(
                 "matmul inner dimensions mismatch: {:?} vs {:?}",
                 a_shape,

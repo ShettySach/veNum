@@ -18,6 +18,11 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     println!("matmul graph nodes: {}", cx.num_nodes());
+    println!("\nMermaid graph:\n{}", cx.graph_mermaid());
+    println!(
+        "\nOptimized Mermaid graph:\n{}",
+        cx.optimized_graph_mermaid()
+    );
     match &out[0] {
         Buffer::F32(v) => {
             println!("output len: {}", v.len());

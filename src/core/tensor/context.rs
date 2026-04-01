@@ -86,6 +86,25 @@ impl Context {
             .expect("Graph mutex should not be poisoned")
             .len()
     }
+
+    pub fn graph_mermaid(&self) -> String {
+        let graph = self
+            .graph
+            .lock()
+            .expect("Graph mutex should not be poisoned");
+        crate::print::to_mermaid(&graph)
+    }
+
+    pub fn optimized_graph_mermaid(&self) -> String {
+        let graph = self
+            .graph
+            .lock()
+            .expect("Graph mutex should not be poisoned")
+            .clone();
+
+        let optimized = crate::core::compile::optimize_hlir(graph.clone()).unwrap_or(graph);
+        crate::print::to_mermaid(&optimized)
+    }
 }
 
 impl Default for Context {
