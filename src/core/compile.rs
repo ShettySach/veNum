@@ -1,163 +1,81 @@
-//! Compile entry point.
-//!
-//! Takes a `Context` with a built computation graph and compiles
-//! it into a `CompiledProgram` ready for execution.
+use anyhow::Result;
 
-use anyhow::{bail, Result};
-use std::sync::Arc;
+use crate::core::hlir::HLIRGraph;
+use crate::core::llir::LLIRProgram;
+use crate::core::lower::lower;
+use crate::core::schedule::{HardwareModel, ScheduleSearcher};
+use crate::core::traits::{CodeGenerator, DependenceAnalyzer};
 
-use crate::core::graph::{NodeId, Op};
-use crate::core::kernel::ExecutableKernel;
-use crate::core::schedule::ScheduleItem;
-
-use super::pass::manager::GraphPass;
-
-use crate::core::tensor::Context;
-
-use super::codegen::backend::Backend;
-use super::codegen::cpu::backend::CpuBackend;
-use super::pass::fusion::FusionPass;
-use super::pass::manager::PassContext;
-use super::pass::memory::MemoryPlanningPass;
-use super::pass::optimize::OptimizationPass;
-use super::program::compiled_program::{CompiledProgram, ExecutionStep};
-use super::program::spec::TensorSpec;
-
-/// Compile a context into an executable program.
-///
-/// # Arguments
-/// * `cx` - The context containing the computation graph
-/// * `inputs` - Input (placeholder) node IDs
-/// * `outputs` - Output (result) node IDs
-///
-/// # Example
-///
-/// ```rust,ignore
-/// let cx = Context::new();
-/// let input = Tensor::placeholder(&cx, DType::F32, vec![4]);
-/// let output = input.exp();
-/// let program = compile(&cx, &[input.id()], &[output.id()])?;
-/// let results = program.execute(&[&input_buffer])?;
-/// ```
-pub fn compile(cx: &Context, inputs: &[NodeId], outputs: &[NodeId]) -> Result<CompiledProgram> {
-    compile_with_backend(cx, inputs, outputs, &CpuBackend::new())
+#[derive(Clone, Debug)]
+pub struct SearchConfig {
+    pub beam_width: usize,
+    pub max_iterations: usize,
 }
 
-/// Compile with a specific backend.
-pub(crate) fn compile_with_backend(
-    cx: &Context,
-    inputs: &[NodeId],
-    outputs: &[NodeId],
-    backend: &dyn Backend,
-) -> Result<CompiledProgram> {
-    if inputs.is_empty() {
-        bail!("compile requires at least one input");
-    }
-    if outputs.is_empty() {
-        bail!("compile requires at least one output");
-    }
-
-    let graph = cx
-        .graph()
-        .lock()
-        .expect("Graph mutex should not be poisoned")
-        .clone();
-
-    // Validate inputs are placeholders (Load with no buffer)
-    for &id in inputs {
-        let node = graph.node(id);
-        if !matches!(node.op, Op::Load) || node.buffer.is_some() {
-            bail!(
-                "Input node {:?} is not a placeholder (must be Op::Load with no buffer)",
-                id
-            );
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            beam_width: 1,
+            max_iterations: 1,
         }
     }
+}
 
-    // Build input/output specs before optimization (shapes are preserved)
-    let input_specs: Vec<TensorSpec> = inputs
-        .iter()
-        .map(|&id| {
-            let node = graph.node(id);
-            TensorSpec::new(id, node.shape.clone(), node.dtype)
-        })
-        .collect();
+pub fn optimize_hlir(hlir: HLIRGraph) -> Result<HLIRGraph> {
+    Ok(hlir)
+}
 
-    let output_specs: Vec<TensorSpec> = outputs
-        .iter()
-        .map(|&id| {
-            let node = graph.node(id);
-            TensorSpec::new(id, node.shape.clone(), node.dtype)
-        })
-        .collect();
+pub fn optimize_llir(program: LLIRProgram, _dep: &impl DependenceAnalyzer) -> Result<LLIRProgram> {
+    Ok(program)
+}
 
-    // --- Pass 1: Optimization ---
-    let ctx = PassContext {
-        graph,
-        inputs: inputs.to_vec(),
-        outputs: outputs.to_vec(),
-    };
+pub fn compile<H, D, C>(
+    hlir: HLIRGraph,
+    hw: &H,
+    dep: &D,
+    cg: &C,
+    config: &SearchConfig,
+) -> Result<C::Output>
+where
+    H: HardwareModel + Clone,
+    D: DependenceAnalyzer,
+    C: CodeGenerator,
+{
+    let hlir = optimize_hlir(hlir)?;
 
-    let opt_pass = OptimizationPass;
-    let ctx = opt_pass.run(ctx)?;
+    let mut searcher = ScheduleSearcher::new(hw.clone());
+    searcher.beam_width = config.beam_width;
+    searcher.max_iterations = config.max_iterations;
 
-    // --- Pass 2: Fusion ---
-    let mut boundary_nodes: Vec<NodeId> = Vec::with_capacity(ctx.inputs.len() + ctx.outputs.len());
-    boundary_nodes.extend_from_slice(&ctx.inputs);
-    boundary_nodes.extend_from_slice(&ctx.outputs);
-
-    let fusion_pass = FusionPass::new(boundary_nodes);
-    let fusion_result = fusion_pass.build_schedules(&ctx);
-
-    // --- Pass 3: Memory planning ---
-    let mem_pass = MemoryPlanningPass;
-    let buffer_plan = mem_pass.build_plan(&ctx);
-
-    // --- Compile kernels from schedules ---
-    let total_items: usize = fusion_result.schedules.iter().map(|s| s.len()).sum();
-    let mut compiled_kernels: Vec<Arc<dyn ExecutableKernel>> = Vec::with_capacity(total_items);
-    let mut execution_steps: Vec<ExecutionStep> = Vec::with_capacity(total_items);
-
-    for schedule in &fusion_result.schedules {
-        for item in schedule {
-            match item {
-                ScheduleItem::Fused(kernel) => {
-                    let compiled = backend.compile_kernel(&ctx.graph, kernel, false)?;
-                    let kernel_idx = compiled_kernels.len();
-                    compiled_kernels.push(compiled);
-
-                    execution_steps.push(ExecutionStep::Kernel {
-                        kernel_idx,
-                        input_nodes: kernel.input_buffers.clone(),
-                        output_node: kernel.root,
-                        numel: kernel.numel,
-                    });
-                }
-                ScheduleItem::Shape(shape_item) => {
-                    execution_steps.push(ExecutionStep::Shape {
-                        op: shape_item.op.clone(),
-                        input_node: shape_item.input,
-                        output_node: shape_item.root,
-                    });
-                }
-                ScheduleItem::Reduce(reduce_item) => {
-                    execution_steps.push(ExecutionStep::Reduce {
-                        op: reduce_item.op.clone(),
-                        input_node: reduce_item.input,
-                        output_node: reduce_item.root,
-                    });
-                }
+    let candidates = searcher.search(&hlir);
+    let mut last_err: Option<anyhow::Error> = None;
+    for (decision, _cost) in candidates {
+        let llir = match lower(&hlir, &decision) {
+            Ok(v) => v,
+            Err(e) => {
+                last_err = Some(e.context("lowering candidate failed"));
+                continue;
+            }
+        };
+        let llir = match optimize_llir(llir, dep) {
+            Ok(v) => v,
+            Err(e) => {
+                last_err = Some(e.context("llir optimization candidate failed"));
+                continue;
+            }
+        };
+        match cg.generate(&llir) {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                last_err = Some(e.context("codegen candidate failed"));
+                continue;
             }
         }
     }
 
-    Ok(CompiledProgram {
-        input_specs,
-        output_specs,
-        buffer_plan,
-        graph: ctx.graph,
-        output_nodes: ctx.outputs,
-        kernels: compiled_kernels,
-        steps: execution_steps,
-    })
+    if let Some(err) = last_err {
+        Err(err.context("No valid schedule candidate survived pipeline"))
+    } else {
+        Err(anyhow::anyhow!("No valid schedule candidate"))
+    }
 }

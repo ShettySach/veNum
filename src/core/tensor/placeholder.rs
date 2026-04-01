@@ -1,7 +1,6 @@
 //! Placeholder tensor constructors.
 
-use crate::core::dtype::DType;
-use crate::core::graph::{Node, Op};
+use crate::core::hlir::{DType, Dim, TensorType};
 use crate::core::tensor::{Context, Tensor};
 
 impl Tensor {
@@ -15,16 +14,14 @@ impl Tensor {
     /// let cx = Context::new();
     /// let input = Tensor::placeholder(&cx, DType::F32, vec![batch, seq_len, hidden]);
     /// ```
-    pub fn placeholder(cx: &Context, dtype: DType, shape: Vec<usize>) -> Self {
+    pub fn placeholder(cx: &Context, dtype: DType, shape: Vec<i64>) -> Self {
+        let dim_shape: Vec<Dim> = shape.into_iter().map(Dim::constant).collect();
         let graph = cx.graph();
-        let id = graph.lock().unwrap().add_node(Node {
-            op: Op::Load,
-            inputs: vec![],
-            shape: shape.clone(),
-            dtype,
-            buffer: None,
-        });
+        let id = graph.lock().unwrap().load(
+            cx.alloc_buffer_id(),
+            TensorType::contiguous(dim_shape.clone(), dtype),
+        );
         cx.register_input(id);
-        Self::new(cx.clone(), id, shape, dtype)
+        Self::new(cx.clone(), id, dim_shape, dtype)
     }
 }

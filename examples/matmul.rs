@@ -1,4 +1,4 @@
-use venum::{compile, Buffer, Context, DType, Tensor};
+use venum::{run_context, Buffer, Context, DType, Tensor};
 
 fn main() -> anyhow::Result<()> {
     let cx = Context::new();
@@ -8,22 +8,23 @@ fn main() -> anyhow::Result<()> {
 
     let z = x.matmul(&y)?;
 
-    let program = compile(&cx, &[x.id(), y.id()], &[z.id()])?;
+    let out = run_context(
+        &cx,
+        &[z.id()],
+        &[
+            Buffer::F32((0..18).map(|i| i as f32).collect()),
+            Buffer::F32((0..10).map(|i| i as f32).collect()),
+        ],
+    )?;
 
-    println!("Input specs: {:?}", program.input_specs);
-    println!("Output specs: {:?}", program.output_specs);
-    println!("Compiled kernels: {}", program.num_kernels());
-    println!("Execution steps: {}\n", program.num_steps());
-
-    println!("Compiled graph:\n{}\n", program.render_compiled_graph());
-
-    let x_buf = Buffer::from_f32_vec((0..18).map(|i| i as f32).collect());
-    let y_buf = Buffer::from_f32_vec((0..10).map(|i| i as f32).collect());
-
-    let output = program.execute_with_metadata(&[&x_buf, &y_buf])?;
-
-    println!("Result shape: {:?}", output.shapes[0]);
-    output.print_tensor(0);
+    println!("matmul graph nodes: {}", cx.num_nodes());
+    match &out[0] {
+        Buffer::F32(v) => {
+            println!("output len: {}", v.len());
+            println!("output: {:?}", v);
+        }
+        _ => println!("unexpected output dtype"),
+    }
 
     Ok(())
 }

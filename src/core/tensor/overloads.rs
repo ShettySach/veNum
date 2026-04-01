@@ -2,17 +2,15 @@
 
 use anyhow::Result;
 
-use crate::core::graph::Op;
-
 use super::structure::Tensor;
 
-macro_rules! impl_binop {
-    ($trait:ident, $method:ident, $op:expr) => {
+macro_rules! impl_binop_method {
+    ($trait:ident, $method:ident, $tensor_method:ident) => {
         impl<'a, 'b> std::ops::$trait<&'b Tensor> for &'a Tensor {
             type Output = Result<Tensor>;
 
             fn $method(self, rhs: &'b Tensor) -> Self::Output {
-                self.binary_op(rhs, $op)
+                Tensor::$tensor_method(self, rhs)
             }
         }
 
@@ -20,7 +18,7 @@ macro_rules! impl_binop {
             type Output = Result<Tensor>;
 
             fn $method(self, rhs: &'b Tensor) -> Self::Output {
-                self.binary_op(rhs, $op)
+                Tensor::$tensor_method(&self, rhs)
             }
         }
 
@@ -28,7 +26,7 @@ macro_rules! impl_binop {
             type Output = Result<Tensor>;
 
             fn $method(self, rhs: Tensor) -> Self::Output {
-                self.binary_op(&rhs, $op)
+                Tensor::$tensor_method(self, &rhs)
             }
         }
 
@@ -36,16 +34,16 @@ macro_rules! impl_binop {
             type Output = Result<Tensor>;
 
             fn $method(self, rhs: Tensor) -> Self::Output {
-                self.binary_op(&rhs, $op)
+                Tensor::$tensor_method(&self, &rhs)
             }
         }
     };
 }
 
-impl_binop!(Add, add, Op::Add);
-impl_binop!(Sub, sub, Op::Sub);
-impl_binop!(Mul, mul, Op::Mul);
-impl_binop!(Div, div, Op::Div);
+impl_binop_method!(Add, add, add);
+impl_binop_method!(Sub, sub, sub);
+impl_binop_method!(Mul, mul, mul);
+impl_binop_method!(Div, div, div);
 
 impl std::ops::Neg for Tensor {
     type Output = Tensor;

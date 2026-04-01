@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 
 use egglog::prelude::*;
 
-use crate::core::graph::{Graph, NodeId};
+use crate::core::hlir::{HLIRGraph as Graph, NodeId};
 
 /// Run the egglog optimizer on the graph rooted at `root`.
 /// Returns a new, optimized Graph and the new root NodeId.
@@ -54,15 +54,9 @@ pub fn optimize(graph: &Graph, root: NodeId) -> Result<(Graph, NodeId)> {
     let (termdag, term) = extracted.context("Egglog returned no extract output")?;
 
     // Parse extracted term back into a new Graph.
-    let root_dtype = graph.node(root).dtype;
-    let (new_graph, new_root) = parse::parse_extracted_term(
-        graph,
-        &termdag,
-        &term,
-        root_dtype,
-        &program_data.shapes,
-        &program_data.perms,
-    )?;
+    let root_dtype = graph.node(root).ty.dtype;
+    let (new_graph, new_root) =
+        parse::parse_extracted_term(graph, &termdag, &term, root_dtype, &[], &[])?;
 
     Ok((new_graph, new_root))
 }

@@ -1,8 +1,7 @@
 //! Convolution operations for tensors.
 
-use anyhow::{anyhow, bail, Result};
-
 use crate::core::tensor::structure::Tensor;
+use anyhow::{anyhow, bail, Result};
 
 impl Tensor {
     /// 2D convolution (cross-correlation) as used in CNNs.
@@ -18,6 +17,7 @@ impl Tensor {
                 weight.dtype
             );
         }
+
         if self.shape.len() != 4 {
             bail!(
                 "conv2d: input must be 4D [batch_size, channels_in, input_height, input_width], got {:?}",
@@ -31,15 +31,31 @@ impl Tensor {
             );
         }
 
-        let batch_size = self.shape[0];
-        let channels_in = self.shape[1];
-        let inp_height = self.shape[2];
-        let inp_width = self.shape[3];
+        let batch_size = self.shape[0]
+            .as_const()
+            .ok_or_else(|| anyhow!("conv2d requires constant batch dimension"))?;
+        let channels_in = self.shape[1]
+            .as_const()
+            .ok_or_else(|| anyhow!("conv2d requires constant channels_in"))?;
+        let inp_height = self.shape[2]
+            .as_const()
+            .ok_or_else(|| anyhow!("conv2d requires constant input height"))?;
+        let inp_width = self.shape[3]
+            .as_const()
+            .ok_or_else(|| anyhow!("conv2d requires constant input width"))?;
 
-        let channels_out = weight.shape[0];
-        let kernel_channels_in = weight.shape[1];
-        let kernel_height = weight.shape[2];
-        let kernel_width = weight.shape[3];
+        let channels_out = weight.shape[0]
+            .as_const()
+            .ok_or_else(|| anyhow!("conv2d requires constant channels_out"))?;
+        let kernel_channels_in = weight.shape[1]
+            .as_const()
+            .ok_or_else(|| anyhow!("conv2d requires constant kernel channels_in"))?;
+        let kernel_height = weight.shape[2]
+            .as_const()
+            .ok_or_else(|| anyhow!("conv2d requires constant kernel height"))?;
+        let kernel_width = weight.shape[3]
+            .as_const()
+            .ok_or_else(|| anyhow!("conv2d requires constant kernel width"))?;
 
         if channels_in != kernel_channels_in {
             bail!(
@@ -48,6 +64,7 @@ impl Tensor {
                 kernel_channels_in
             );
         }
+
         if kernel_height > inp_height || kernel_width > inp_width {
             bail!(
                 "conv2d: kernel [{}, {}] larger than input [{}, {}]",

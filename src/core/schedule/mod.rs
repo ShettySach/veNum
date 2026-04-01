@@ -1,5 +1,13 @@
-pub mod fused_kernel;
-mod topo;
+pub mod decision;
+pub mod fusion;
+pub mod opt;
+pub mod search;
 
-pub use fused_kernel::{FusedKernel, ReduceKind, ScheduleItem};
-pub use topo::build_schedule_with_policy;
+#[cfg(test)]
+mod tests;
+
+pub use decision::{FusionGroup, FusionGroupId, FusionTopology, ScheduleDecision};
+pub use opt::{Opt, OptOp};
+pub use search::{
+    BackendClass, CostEstimate, HardwareModel, KernelContext, ScheduleSearcher, TrivialHardware,
+};

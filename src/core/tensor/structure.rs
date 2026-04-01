@@ -1,7 +1,6 @@
 //! Tensor structure.
 
-use crate::core::dtype::DType;
-use crate::core::graph::{Graph, NodeId};
+use crate::core::hlir::{DType, Dim, HLIRGraph, NodeId};
 
 use super::context::Context;
 
@@ -10,7 +9,7 @@ use super::context::Context;
 pub struct Tensor {
     pub(crate) cx: Context,
     pub(crate) id: NodeId,
-    pub(crate) shape: Vec<usize>,
+    pub(crate) shape: Vec<Dim>,
     pub(crate) dtype: DType,
 }
 
@@ -21,7 +20,7 @@ impl Tensor {
     }
 
     /// Get the shape of the tensor.
-    pub fn shape(&self) -> &[usize] {
+    pub fn shape(&self) -> &[Dim] {
         &self.shape
     }
 
@@ -36,17 +35,13 @@ impl Tensor {
     }
 
     /// Get the total number of elements.
-    pub fn numel(&self) -> usize {
-        self.shape.iter().product()
-    }
-
     /// Get the rank (number of dimensions).
     pub fn rank(&self) -> usize {
         self.shape.len()
     }
 
     /// Create a new tensor (internal use).
-    pub(crate) fn new(cx: Context, id: NodeId, shape: Vec<usize>, dtype: DType) -> Self {
+    pub(crate) fn new(cx: Context, id: NodeId, shape: Vec<Dim>, dtype: DType) -> Self {
         Self {
             cx,
             id,
@@ -56,12 +51,12 @@ impl Tensor {
     }
 
     /// Execute a function with mutable access to the graph.
-    pub(crate) fn with_graph_mut<R>(&self, f: impl FnOnce(&mut Graph) -> R) -> R {
+    pub(crate) fn with_graph_mut<R>(&self, f: impl FnOnce(&mut HLIRGraph) -> R) -> R {
         f(&mut self.cx.graph().lock().unwrap())
     }
 
     /// Create a derived tensor with the same context and dtype.
-    pub(crate) fn derived(&self, id: NodeId, shape: Vec<usize>) -> Self {
+    pub(crate) fn derived(&self, id: NodeId, shape: Vec<Dim>) -> Self {
         Self {
             cx: self.cx.clone(),
             id,

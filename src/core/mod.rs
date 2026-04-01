@@ -1,15 +1,13 @@
-mod tests;
-
-pub mod codegen;
 pub mod compile;
-pub mod dtype;
-pub mod exec;
-pub mod fusion_policy;
-pub mod graph;
-pub mod kernel;
-pub mod optimize;
-pub mod pass;
-pub mod program;
+pub mod cpu;
+pub mod dep;
+pub mod hlir;
+pub mod llir;
+pub mod lower;
+pub mod runner;
 pub mod schedule;
-pub mod shape_tracker;
 pub mod tensor;
+pub mod traits;
+
+#[cfg(test)]
+mod pipeline_tests;

@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 
+use crate::core::hlir::ReduceOp;
 use crate::core::tensor::helpers::{compute_reduced_shape, normalize_axes};
 use crate::core::tensor::structure::Tensor;
 
@@ -10,7 +11,7 @@ impl Tensor {
     pub fn sum(&self, dims: &[isize], keepdims: bool) -> Result<Tensor> {
         let dims_usize = normalize_axes(dims, self.shape.len())?;
         let shape = compute_reduced_shape(&self.shape, &dims_usize, keepdims);
-        let id = self.with_graph_mut(|g| g.sum(self.id, dims_usize, keepdims, shape.clone()));
+        let id = self.with_graph_mut(|g| g.reduce(self.id, dims_usize, ReduceOp::Sum, keepdims));
         Ok(self.derived(id, shape))
     }
 
@@ -18,7 +19,7 @@ impl Tensor {
     pub fn prod(&self, dims: &[isize], keepdims: bool) -> Result<Tensor> {
         let dims_usize = normalize_axes(dims, self.shape.len())?;
         let shape = compute_reduced_shape(&self.shape, &dims_usize, keepdims);
-        let id = self.with_graph_mut(|g| g.prod(self.id, dims_usize, keepdims, shape.clone()));
+        let id = self.with_graph_mut(|g| g.reduce(self.id, dims_usize, ReduceOp::Prod, keepdims));
         Ok(self.derived(id, shape))
     }
 
@@ -26,7 +27,7 @@ impl Tensor {
     pub fn max(&self, dims: &[isize], keepdims: bool) -> Result<Tensor> {
         let dims_usize = normalize_axes(dims, self.shape.len())?;
         let shape = compute_reduced_shape(&self.shape, &dims_usize, keepdims);
-        let id = self.with_graph_mut(|g| g.max(self.id, dims_usize, keepdims, shape.clone()));
+        let id = self.with_graph_mut(|g| g.reduce(self.id, dims_usize, ReduceOp::Max, keepdims));
         Ok(self.derived(id, shape))
     }
 
@@ -34,7 +35,7 @@ impl Tensor {
     pub fn min(&self, dims: &[isize], keepdims: bool) -> Result<Tensor> {
         let dims_usize = normalize_axes(dims, self.shape.len())?;
         let shape = compute_reduced_shape(&self.shape, &dims_usize, keepdims);
-        let id = self.with_graph_mut(|g| g.min(self.id, dims_usize, keepdims, shape.clone()));
+        let id = self.with_graph_mut(|g| g.reduce(self.id, dims_usize, ReduceOp::Min, keepdims));
         Ok(self.derived(id, shape))
     }
 
