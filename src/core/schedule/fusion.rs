@@ -40,31 +40,6 @@ pub fn fusion_groups_form_acyclic_partition(groups: &[FusionGroup]) -> bool {
 }
 
 #[cfg(test)]
-fn op_inputs(op: &crate::core::hlir::Op) -> Vec<NodeId> {
-    use crate::core::hlir::Op;
-    match op {
-        Op::Const { .. } | Op::Load { .. } => vec![],
-        Op::Store { value, .. } => vec![*value],
-        Op::Neg(a)
-        | Op::Recip(a)
-        | Op::Exp(a)
-        | Op::Log(a)
-        | Op::Sqrt(a)
-        | Op::Sin(a)
-        | Op::Cos(a) => vec![*a],
-        Op::Cast { input, .. }
-        | Op::Reshape { input, .. }
-        | Op::Permute { input, .. }
-        | Op::Slice { input, .. }
-        | Op::Expand { input, .. }
-        | Op::Reduce { input, .. } => vec![*input],
-        Op::Add(a, b) | Op::Mul(a, b) | Op::Max(a, b) | Op::Min(a, b) => vec![*a, *b],
-        Op::Cmp { lhs, rhs, .. } => vec![*lhs, *rhs],
-        Op::Where {
-            cond,
-            then_val,
-            else_val,
-        } => vec![*cond, *then_val, *else_val],
-        Op::Concat { inputs, .. } => inputs.clone(),
-    }
+fn op_inputs(op: &crate::core::hlir::Op) -> smallvec::SmallVec<[NodeId; 3]> {
+    op.inputs()
 }

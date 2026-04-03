@@ -2,7 +2,7 @@
 
 use anyhow::{bail, Result};
 
-use crate::core::hlir::Op;
+use crate::core::hlir::{decompose, Op};
 
 use crate::core::tensor::structure::Tensor;
 
@@ -62,5 +62,22 @@ impl Tensor {
             bail!("sqrt requires float dtype, got {:?}", self.dtype);
         }
         Ok(self.unary_op(Op::Sqrt(self.id)))
+    }
+
+    /// Element-wise sine.
+    pub fn sin(&self) -> Result<Tensor> {
+        if !self.dtype.is_float() {
+            bail!("sin requires float dtype, got {:?}", self.dtype);
+        }
+        Ok(self.unary_op(Op::Sin(self.id)))
+    }
+
+    /// Element-wise cosine. Decomposed as `sin(x + π/2)`.
+    pub fn cos(&self) -> Result<Tensor> {
+        if !self.dtype.is_float() {
+            bail!("cos requires float dtype, got {:?}", self.dtype);
+        }
+        let id = self.with_graph_mut(|g| decompose::cos(g, self.id));
+        Ok(self.derived(id, self.shape.clone()))
     }
 }

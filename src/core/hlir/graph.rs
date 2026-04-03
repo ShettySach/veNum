@@ -140,7 +140,7 @@ impl HLIRGraph {
             .iter()
             .map(|r| match (&r.start, &r.end) {
                 (Dim::Const(s), Dim::Const(e)) => Dim::constant(e - s),
-                _ => Dim::add(r.end.clone(), Dim::mul(Dim::constant(-1), r.start.clone())),
+                _ => r.end.clone() + Dim::constant(-1) * r.start.clone(),
             })
             .collect();
         let out_ty = TensorType {
@@ -168,7 +168,7 @@ impl HLIRGraph {
             let b = &ty.shape[axis];
             shape[axis] = match (a.as_const(), b.as_const()) {
                 (Some(av), Some(bv)) => Dim::constant(av + bv),
-                _ => Dim::add(a.clone(), b.clone()),
+                _ => a.clone() + b.clone(),
             };
         }
 

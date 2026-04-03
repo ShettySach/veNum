@@ -24,71 +24,7 @@ enum LeafKind {
     Const { ty: TensorType, value: Scalar },
 }
 
-/// The egglog datatype and rewrite rules (string DSL).
-/// Note: does NOT include `(run N)` — that's appended after term insertions.
-const EGGLOG_SCHEMA: &str = r#"
-(datatype Expr
-  (Leaf i64)
-  (Zero i64)
-  (One  i64)
-  (ENeg Expr)
-  (ERecip Expr)
-  (EExp Expr)
-  (ELog Expr)
-  (ESqrt Expr)
-  (ESin Expr)
-  (ECos Expr)
-  (EAdd Expr Expr)
-  (EMul Expr Expr)
-  (EMax Expr Expr)
-  (EMin Expr Expr)
-  (EReshape Expr i64)
-  (ECast Expr i64))
-
-;; Identity rules — oriented toward fewer ops
-(rewrite (EAdd ?x (Zero ?k)) ?x)
-(rewrite (EAdd (Zero ?k) ?x) ?x)
-(rewrite (EMul ?x (One ?k)) ?x)
-(rewrite (EMul (One ?k) ?x) ?x)
-(rewrite (EMul ?x (Zero ?k)) (Zero ?k))
-(rewrite (EMul (Zero ?k) ?x) (Zero ?k))
-
-;; Involution cancellation
-(rewrite (ENeg (ENeg ?x)) ?x)
-(rewrite (ERecip (ERecip ?x)) ?x)
-
-;; Inverse cancellation
-(rewrite (EExp (ELog ?x)) ?x)
-(rewrite (ELog (EExp ?x)) ?x)
-
-;; Commutativity (for cost normalization)
-(rewrite (EAdd ?x ?y) (EAdd ?y ?x))
-(rewrite (EMul ?x ?y) (EMul ?y ?x))
-
-;; Sqrt(x)*Sqrt(x) = x
-(rewrite (EMul (ESqrt ?x) (ESqrt ?x)) ?x)
-
-;; Reshape-reshape collapse: Reshape(Reshape(x, s1), s2) → Reshape(x, s2)
-(rewrite (EReshape (EReshape ?x ?s1) ?s2) (EReshape ?x ?s2))
-
-;; Reshape sinking through unary ops
-(rewrite (ENeg (EReshape ?x ?s)) (EReshape (ENeg ?x) ?s))
-(rewrite (ERecip (EReshape ?x ?s)) (EReshape (ERecip ?x) ?s))
-(rewrite (EExp (EReshape ?x ?s)) (EReshape (EExp ?x) ?s))
-(rewrite (ELog (EReshape ?x ?s)) (EReshape (ELog ?x) ?s))
-(rewrite (ESqrt (EReshape ?x ?s)) (EReshape (ESqrt ?x) ?s))
-(rewrite (ESin (EReshape ?x ?s)) (EReshape (ESin ?x) ?s))
-(rewrite (ECos (EReshape ?x ?s)) (EReshape (ECos ?x) ?s))
-
-;; Cast sinking through reshape
-(rewrite (ECast (EReshape ?x ?s) ?d) (EReshape (ECast ?x ?d) ?s))
-
-;; Reshape sinking through binary ops (both inputs same reshape target)
-(rewrite (EAdd (EReshape ?x ?s) (EReshape ?y ?s)) (EReshape (EAdd ?x ?y) ?s))
-(rewrite (EMul (EReshape ?x ?s) (EReshape ?y ?s)) (EReshape (EMul ?x ?y) ?s))
-(rewrite (EMax (EReshape ?x ?s) (EReshape ?y ?s)) (EReshape (EMax ?x ?y) ?s))
-(rewrite (EMin (EReshape ?x ?s) (EReshape ?y ?s)) (EReshape (EMin ?x ?y) ?s))
-"#;
+const EGGLOG_SCHEMA: &str = include_str!("algebra.egg");
 
 /// Run egglog algebraic simplification on the HLIR graph.
 ///
@@ -110,14 +46,12 @@ pub fn egglog_algebraic(
 
     // User roots that are algebraic (have egglog terms).
     for &id in roots {
-        if let Some(term) = ctx.term_memo.get(&id) {
-            if !EgglogContext::is_barrier_encoded(&ctx, id) {
-                extract_entries.push((term.clone(), id));
-            }
+        if let Some(term) = ctx.term_memo.get(&id)
+            && !EgglogContext::is_barrier_encoded(&ctx, id)
+        {
+            extract_entries.push((term.clone(), id));
         }
     }
-    let _num_user_alg_roots = extract_entries.len();
-
     // Algebraic sub-roots needed by barriers.
     for (term, src_id) in &ctx.algebraic_roots {
         extract_entries.push((term.clone(), *src_id));
@@ -126,7 +60,8 @@ pub fn egglog_algebraic(
     if extract_entries.is_empty() {
         // Nothing algebraic — just rebuild barriers directly.
         let mut out = ctx.out;
-        let remap = rebuild_all_barriers(graph, roots, &ctx.barriers, &[], &ctx.built_map, &mut out);
+        let remap =
+            rebuild_all_barriers(graph, roots, &ctx.barriers, &[], &ctx.built_map, &mut out);
         return (out, remap);
     }
 
@@ -166,7 +101,14 @@ pub fn egglog_algebraic(
     for (i, (_, src_id)) in extract_entries.iter().enumerate() {
         if let Some((termdag, term)) = extracted.get(i) {
             let term_str = termdag.to_string(term);
-            let new_id = decode_term(&term_str, &ctx.leaves, &ctx.shape_meta, &ctx.dtype_meta, &mut out, &mut decode_memo);
+            let new_id = decode_term(
+                &term_str,
+                &ctx.leaves,
+                &ctx.shape_meta,
+                &ctx.dtype_meta,
+                &mut out,
+                &mut decode_memo,
+            );
             decoded_map.insert(*src_id, new_id);
         }
     }
@@ -190,7 +132,14 @@ pub fn egglog_algebraic(
     }
 
     // Rebuild barrier nodes using decoded inputs.
-    let mut remap = rebuild_all_barriers(graph, roots, &ctx.barriers, &alg_decoded, &decoded_map, &mut out);
+    let mut remap = rebuild_all_barriers(
+        graph,
+        roots,
+        &ctx.barriers,
+        &alg_decoded,
+        &decoded_map,
+        &mut out,
+    );
 
     // Add algebraic user roots to remap.
     for (&src, &out_id) in &decoded_map {
@@ -220,6 +169,10 @@ struct EgglogContext<'a> {
     shape_meta: Vec<Vec<Dim>>,
     /// DType metadata, keyed by integer id used in ECast terms.
     dtype_meta: Vec<DType>,
+    /// Dedup map for shape ids.
+    shape_dedup: HashMap<Vec<Dim>, i64>,
+    /// Dedup map for dtype ids.
+    dtype_dedup: HashMap<DType, i64>,
     /// Algebraic sub-roots that need egglog extraction (fed to barriers).
     algebraic_roots: Vec<(String, NodeId)>,
     /// Barrier nodes that need post-decode reconstruction.
@@ -237,6 +190,8 @@ impl<'a> EgglogContext<'a> {
             leaves: Vec::new(),
             shape_meta: Vec::new(),
             dtype_meta: Vec::new(),
+            shape_dedup: HashMap::new(),
+            dtype_dedup: HashMap::new(),
             algebraic_roots: Vec::new(),
             barriers: Vec::new(),
             built_map: HashMap::new(),
@@ -250,24 +205,21 @@ impl<'a> EgglogContext<'a> {
     }
 
     fn alloc_shape(&mut self, shape: Vec<Dim>) -> i64 {
-        // Reuse existing id for identical shapes.
-        for (i, existing) in self.shape_meta.iter().enumerate() {
-            if *existing == shape {
-                return i as i64;
-            }
+        if let Some(&id) = self.shape_dedup.get(&shape) {
+            return id;
         }
         let id = self.shape_meta.len() as i64;
+        self.shape_dedup.insert(shape.clone(), id);
         self.shape_meta.push(shape);
         id
     }
 
     fn alloc_dtype(&mut self, dtype: DType) -> i64 {
-        for (i, existing) in self.dtype_meta.iter().enumerate() {
-            if *existing == dtype {
-                return i as i64;
-            }
+        if let Some(&id) = self.dtype_dedup.get(&dtype) {
+            return id;
         }
         let id = self.dtype_meta.len() as i64;
+        self.dtype_dedup.insert(dtype, id);
         self.dtype_meta.push(dtype);
         id
     }
@@ -283,7 +235,6 @@ impl<'a> EgglogContext<'a> {
                 | Op::Log(_)
                 | Op::Sqrt(_)
                 | Op::Sin(_)
-                | Op::Cos(_)
                 | Op::Cast { .. }
                 | Op::Add(_, _)
                 | Op::Mul(_, _)
@@ -385,10 +336,6 @@ impl<'a> EgglogContext<'a> {
             Op::Sin(input) => {
                 let inner = self.encode(*input);
                 format!("(ESin {inner})")
-            }
-            Op::Cos(input) => {
-                let inner = self.encode(*input);
-                format!("(ECos {inner})")
             }
 
             // Cast
@@ -582,10 +529,6 @@ fn decode_inner(
         "ESin" => {
             let c = decode_term(rest.trim(), leaves, shapes, dtypes, out, memo);
             out.unary(c, Op::Sin)
-        }
-        "ECos" => {
-            let c = decode_term(rest.trim(), leaves, shapes, dtypes, out, memo);
-            out.unary(c, Op::Cos)
         }
         "EReshape" => {
             let (child_term, sid_str) = split_two_sexprs(rest);

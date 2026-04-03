@@ -101,7 +101,6 @@ pub(super) fn remap_op_inputs(op: &Op, new_inputs: &[NodeId]) -> Op {
         Op::Log(_) => Op::Log(it.next().unwrap()),
         Op::Sqrt(_) => Op::Sqrt(it.next().unwrap()),
         Op::Sin(_) => Op::Sin(it.next().unwrap()),
-        Op::Cos(_) => Op::Cos(it.next().unwrap()),
         Op::Cast { to, .. } => Op::Cast {
             input: it.next().unwrap(),
             to: *to,

@@ -1,21 +1,11 @@
 //! Tensor constructors.
 
-use crate::core::hlir::{DType, Dim, Scalar, TensorType};
+use crate::core::hlir::{Dim, Scalar};
 
 use super::context::Context;
 use super::structure::Tensor;
 
 impl Tensor {
-    /// Create a symbolic load tensor from a logical buffer id.
-    pub fn load(cx: &Context, dtype: DType, shape: Vec<i64>) -> Self {
-        let dim_shape: Vec<Dim> = shape.into_iter().map(Dim::constant).collect();
-        let id = cx.graph().lock().unwrap().load(
-            cx.alloc_buffer_id(),
-            TensorType::contiguous(dim_shape.clone(), dtype),
-        );
-        Self::new(cx.clone(), id, dim_shape, dtype)
-    }
-
     // ==================== Constants ====================
 
     /// Create a constant tensor with a scalar repeated over shape.

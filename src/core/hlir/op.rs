@@ -1,3 +1,5 @@
+use smallvec::{SmallVec, smallvec};
+
 use super::dim::Dim;
 use super::types::{BufferId, DType, NodeId, Scalar};
 
@@ -45,7 +47,6 @@ pub enum Op {
     Log(NodeId),
     Sqrt(NodeId),
     Sin(NodeId),
-    Cos(NodeId),
     Cast {
         input: NodeId,
         to: DType,
@@ -104,7 +105,6 @@ impl Op {
             Op::Log(_) => "Log",
             Op::Sqrt(_) => "Sqrt",
             Op::Sin(_) => "Sin",
-            Op::Cos(_) => "Cos",
             Op::Cast { .. } => "Cast",
             Op::Add(_, _) => "Add",
             Op::Mul(_, _) => "Mul",
@@ -121,31 +121,27 @@ impl Op {
         }
     }
 
-    pub fn inputs(&self) -> Vec<NodeId> {
+    pub fn inputs(&self) -> SmallVec<[NodeId; 3]> {
         match self {
-            Op::Const { .. } | Op::Load { .. } => vec![],
-            Op::Store { value, .. } => vec![*value],
-            Op::Neg(a)
-            | Op::Recip(a)
-            | Op::Exp(a)
-            | Op::Log(a)
-            | Op::Sqrt(a)
-            | Op::Sin(a)
-            | Op::Cos(a) => vec![*a],
+            Op::Const { .. } | Op::Load { .. } => smallvec![],
+            Op::Store { value, .. } => smallvec![*value],
+            Op::Neg(a) | Op::Recip(a) | Op::Exp(a) | Op::Log(a) | Op::Sqrt(a) | Op::Sin(a) => {
+                smallvec![*a]
+            }
             Op::Cast { input, .. }
             | Op::Reduce { input, .. }
             | Op::Reshape { input, .. }
             | Op::Permute { input, .. }
             | Op::Slice { input, .. }
-            | Op::Expand { input, .. } => vec![*input],
-            Op::Add(a, b) | Op::Mul(a, b) | Op::Max(a, b) | Op::Min(a, b) => vec![*a, *b],
-            Op::Cmp { lhs, rhs, .. } => vec![*lhs, *rhs],
+            | Op::Expand { input, .. } => smallvec![*input],
+            Op::Add(a, b) | Op::Mul(a, b) | Op::Max(a, b) | Op::Min(a, b) => smallvec![*a, *b],
+            Op::Cmp { lhs, rhs, .. } => smallvec![*lhs, *rhs],
             Op::Where {
                 cond,
                 then_val,
                 else_val,
-            } => vec![*cond, *then_val, *else_val],
-            Op::Concat { inputs, .. } => inputs.clone(),
+            } => smallvec![*cond, *then_val, *else_val],
+            Op::Concat { inputs, .. } => inputs.iter().copied().collect(),
         }
     }
 }

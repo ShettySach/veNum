@@ -1,11 +1,25 @@
 use super::graph::HLIRGraph;
 use super::op::ReduceOp;
-use super::types::NodeId;
+use super::types::{NodeId, Scalar};
 use super::Dim;
 
 pub fn sub(graph: &mut HLIRGraph, lhs: NodeId, rhs: NodeId) -> NodeId {
     let neg_rhs = graph.unary(rhs, super::op::Op::Neg);
     graph.binary(lhs, neg_rhs, super::op::Op::Add)
+}
+
+/// cos(x) = sin(x + π/2)
+pub fn cos(graph: &mut HLIRGraph, input: NodeId) -> NodeId {
+    let ty = graph.ty(input);
+    let dtype = ty.dtype;
+    let shape = ty.shape.clone();
+    let half_pi = graph.constant(
+        Scalar::from_f64(std::f64::consts::FRAC_PI_2, dtype),
+        shape,
+        dtype,
+    );
+    let shifted = graph.binary(input, half_pi, super::op::Op::Add);
+    graph.unary(shifted, super::op::Op::Sin)
 }
 
 pub fn div(graph: &mut HLIRGraph, lhs: NodeId, rhs: NodeId) -> NodeId {
@@ -82,6 +96,6 @@ fn broadcast_dim(lhs: Dim, rhs: Dim) -> Dim {
         (Dim::Const(1), _) => rhs,
         (_, Dim::Const(1)) => lhs,
         _ if lhs == rhs => lhs,
-        _ => lhs,
+        _ => panic!("incompatible dims for broadcast: {:?} vs {:?}", lhs, rhs),
     }
 }

@@ -1,0 +1,59 @@
+(datatype Expr
+  (Leaf i64)
+  (Zero i64)
+  (One  i64)
+  (ENeg Expr)
+  (ERecip Expr)
+  (EExp Expr)
+  (ELog Expr)
+  (ESqrt Expr)
+  (ESin Expr)
+  (EAdd Expr Expr)
+  (EMul Expr Expr)
+  (EMax Expr Expr)
+  (EMin Expr Expr)
+  (EReshape Expr i64)
+  (ECast Expr i64))
+
+;; Identity rules — oriented toward fewer ops
+(rewrite (EAdd ?x (Zero ?k)) ?x)
+(rewrite (EAdd (Zero ?k) ?x) ?x)
+(rewrite (EMul ?x (One ?k)) ?x)
+(rewrite (EMul (One ?k) ?x) ?x)
+(rewrite (EMul ?x (Zero ?k)) (Zero ?k))
+(rewrite (EMul (Zero ?k) ?x) (Zero ?k))
+
+;; Involution cancellation
+(rewrite (ENeg (ENeg ?x)) ?x)
+(rewrite (ERecip (ERecip ?x)) ?x)
+
+;; Inverse cancellation
+(rewrite (EExp (ELog ?x)) ?x)
+(rewrite (ELog (EExp ?x)) ?x)
+
+;; Commutativity (for cost normalization)
+(rewrite (EAdd ?x ?y) (EAdd ?y ?x))
+(rewrite (EMul ?x ?y) (EMul ?y ?x))
+
+;; Sqrt(x)*Sqrt(x) = x
+(rewrite (EMul (ESqrt ?x) (ESqrt ?x)) ?x)
+
+;; Reshape-reshape collapse: Reshape(Reshape(x, s1), s2) → Reshape(x, s2)
+(rewrite (EReshape (EReshape ?x ?s1) ?s2) (EReshape ?x ?s2))
+
+;; Reshape sinking through unary ops
+(rewrite (ENeg (EReshape ?x ?s)) (EReshape (ENeg ?x) ?s))
+(rewrite (ERecip (EReshape ?x ?s)) (EReshape (ERecip ?x) ?s))
+(rewrite (EExp (EReshape ?x ?s)) (EReshape (EExp ?x) ?s))
+(rewrite (ELog (EReshape ?x ?s)) (EReshape (ELog ?x) ?s))
+(rewrite (ESqrt (EReshape ?x ?s)) (EReshape (ESqrt ?x) ?s))
+(rewrite (ESin (EReshape ?x ?s)) (EReshape (ESin ?x) ?s))
+
+;; Cast sinking through reshape
+(rewrite (ECast (EReshape ?x ?s) ?d) (EReshape (ECast ?x ?d) ?s))
+
+;; Reshape sinking through binary ops (both inputs same reshape target)
+(rewrite (EAdd (EReshape ?x ?s) (EReshape ?y ?s)) (EReshape (EAdd ?x ?y) ?s))
+(rewrite (EMul (EReshape ?x ?s) (EReshape ?y ?s)) (EReshape (EMul ?x ?y) ?s))
+(rewrite (EMax (EReshape ?x ?s) (EReshape ?y ?s)) (EReshape (EMax ?x ?y) ?s))
+(rewrite (EMin (EReshape ?x ?s) (EReshape ?y ?s)) (EReshape (EMin ?x ?y) ?s))

@@ -26,18 +26,6 @@ impl Dim {
         Self::Sym(symbol)
     }
 
-    pub fn add(lhs: Dim, rhs: Dim) -> Self {
-        Self::Add(Box::new(lhs), Box::new(rhs))
-    }
-
-    pub fn mul(lhs: Dim, rhs: Dim) -> Self {
-        Self::Mul(Box::new(lhs), Box::new(rhs))
-    }
-
-    pub fn div(lhs: Dim, rhs: Dim) -> Self {
-        Self::Div(Box::new(lhs), Box::new(rhs))
-    }
-
     pub fn modulo(lhs: Dim, rhs: Dim) -> Self {
         Self::Mod(Box::new(lhs), Box::new(rhs))
     }
@@ -47,5 +35,29 @@ impl Dim {
             Dim::Const(v) => Some(*v),
             _ => None,
         }
+    }
+}
+
+impl std::ops::Add for Dim {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self {
+        Self::Add(Box::new(self), Box::new(rhs))
+    }
+}
+
+impl std::ops::Mul for Dim {
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self {
+        Self::Mul(Box::new(self), Box::new(rhs))
+    }
+}
+
+impl std::ops::Div for Dim {
+    type Output = Self;
+
+    fn div(self, rhs: Self) -> Self {
+        Self::Div(Box::new(self), Box::new(rhs))
     }
 }

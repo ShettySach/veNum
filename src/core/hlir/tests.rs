@@ -1,7 +1,7 @@
 #[cfg(test)]
-mod tests {
+mod hlir_tests {
     use crate::core::hlir::optimize::{canonicalize_hlir, canonicalize_with_roots};
-    use crate::core::hlir::{decompose, BufferId, DType, Dim, HLIRGraph, Op, ReduceOp, TensorType};
+    use crate::core::hlir::{BufferId, DType, Dim, HLIRGraph, Op, ReduceOp, TensorType, decompose};
 
     #[test]
     fn hlir_graph_build_and_topo_iter() {
@@ -83,8 +83,14 @@ mod tests {
         assert!(opt.topo_iter().any(|(_, n)| matches!(n.op, Op::Add(_, _))));
         // The reshape should come after the add, not before
         let nodes: Vec<_> = opt.topo_iter().collect();
-        let add_idx = nodes.iter().position(|(_, n)| matches!(n.op, Op::Add(_, _))).unwrap();
-        let reshape_idx = nodes.iter().position(|(_, n)| matches!(n.op, Op::Reshape { .. })).unwrap();
+        let add_idx = nodes
+            .iter()
+            .position(|(_, n)| matches!(n.op, Op::Add(_, _)))
+            .unwrap();
+        let reshape_idx = nodes
+            .iter()
+            .position(|(_, n)| matches!(n.op, Op::Reshape { .. }))
+            .unwrap();
         assert!(add_idx < reshape_idx, "Add should come before Reshape");
     }
 }

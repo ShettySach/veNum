@@ -62,8 +62,8 @@ impl Scalar {
     pub fn to_f64(&self) -> f64 {
         match self {
             Scalar::F32(v) => *v as f64,
-            Scalar::F16(v) => *v as f64,
-            Scalar::BF16(v) => *v as f64,
+            Scalar::F16(bits) => f16_bits_to_f64(*bits),
+            Scalar::BF16(bits) => bf16_bits_to_f64(*bits),
             Scalar::F64(v) => *v,
             Scalar::I8(v) => *v as f64,
             Scalar::I16(v) => *v as f64,
@@ -114,8 +114,8 @@ impl Scalar {
             Scalar::U32(v) => *v == 1,
             Scalar::U64(v) => *v == 1,
             Scalar::Bool(v) => *v,
-            Scalar::F16(v) => *v == 0x3C00,  // IEEE 754 half-precision 1.0
-            Scalar::BF16(v) => *v == 0x3F80,  // bfloat16 1.0
+            Scalar::F16(v) => *v == 0x3C00, // IEEE 754 half-precision 1.0
+            Scalar::BF16(v) => *v == 0x3F80, // bfloat16 1.0
         }
     }
 
@@ -136,6 +136,42 @@ impl Scalar {
             DType::Bool => Scalar::Bool(val != 0.0),
         }
     }
+}
+
+fn f16_bits_to_f64(bits: u16) -> f64 {
+    let sign = ((bits >> 15) & 1) as u64;
+    let exp = ((bits >> 10) & 0x1F) as i32;
+    let frac = (bits & 0x3FF) as u64;
+
+    if exp == 0 {
+        if frac == 0 {
+            return if sign == 1 { -0.0 } else { 0.0 };
+        }
+        // Subnormal
+        let val = (frac as f64) * 2.0_f64.powi(-24);
+        return if sign == 1 { -val } else { val };
+    }
+    if exp == 0x1F {
+        return if frac == 0 {
+            if sign == 1 {
+                f64::NEG_INFINITY
+            } else {
+                f64::INFINITY
+            }
+        } else {
+            f64::NAN
+        };
+    }
+    let f64_exp = (exp - 15 + 1023) as u64;
+    let f64_frac = frac << 42; // 52 - 10 = 42
+    let f64_bits = (sign << 63) | (f64_exp << 52) | f64_frac;
+    f64::from_bits(f64_bits)
+}
+
+fn bf16_bits_to_f64(bits: u16) -> f64 {
+    // BF16 is the upper 16 bits of an f32
+    let f32_bits = (bits as u32) << 16;
+    f32::from_bits(f32_bits) as f64
 }
 
 impl DType {

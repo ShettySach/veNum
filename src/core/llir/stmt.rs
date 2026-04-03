@@ -60,7 +60,6 @@ pub enum UnaryOp {
     Log,
     Sqrt,
     Sin,
-    Cos,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

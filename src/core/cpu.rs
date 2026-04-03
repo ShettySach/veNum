@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use crate::core::compile::OutputRemapper;
-use crate::core::hlir::{op::CmpOp, BufferId, DType, Dim, NodeId, Op, Scalar};
+use crate::core::hlir::{BufferId, DType, Dim, NodeId, Op, Scalar, op::CmpOp};
 use crate::core::llir::LLIRProgram;
 use crate::core::traits::CodeGenerator;
 
@@ -113,7 +113,7 @@ fn eval_node(
     Ok(v)
 }
 
-fn op_inputs(op: &Op) -> Vec<NodeId> {
+fn op_inputs(op: &Op) -> smallvec::SmallVec<[NodeId; 3]> {
     op.inputs()
 }
 
@@ -169,7 +169,6 @@ fn eval_op(
         Op::Log(a) => unary(values, *a, |x| x.ln())?,
         Op::Sqrt(a) => unary(values, *a, |x| x.sqrt())?,
         Op::Sin(a) => unary(values, *a, |x| x.sin())?,
-        Op::Cos(a) => unary(values, *a, |x| x.cos())?,
         Op::Reshape { input, .. } => {
             let mut v = values
                 .get(input)

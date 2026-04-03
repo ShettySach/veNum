@@ -2,7 +2,7 @@
 mod tests {
     use anyhow::Result;
 
-    use crate::core::compile::{compile, SearchConfig};
+    use crate::core::compile::{SearchConfig, compile};
     use crate::core::cpu::{Buffer, CpuCodeGenerator};
     use crate::core::dep::NoOpDependenceAnalyzer;
     use crate::core::hlir::{BufferId, DType, Dim, HLIRGraph, Op, TensorType};
