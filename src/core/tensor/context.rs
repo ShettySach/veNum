@@ -105,6 +105,72 @@ impl Context {
         let optimized = canonicalize_with_roots(&graph, roots);
         crate::print::to_mermaid(&optimized)
     }
+
+    pub fn schedule_mermaid(
+        &self,
+        roots: &[NodeId],
+        config: &crate::core::compile::SearchConfig,
+    ) -> String {
+        use crate::core::schedule::ScheduleSearcher;
+
+        let graph = self
+            .graph
+            .lock()
+            .expect("Graph mutex should not be poisoned")
+            .clone();
+
+        let optimized = if config.enable_canonicalization {
+            canonicalize_with_roots(&graph, roots)
+        } else {
+            graph
+        };
+
+        let mut searcher = ScheduleSearcher::new(crate::core::cost::CpuHardwareModel::default());
+        searcher.beam_width = config.beam_width;
+        searcher.max_iterations = config.max_iterations;
+
+        let decision = searcher.search_best(&optimized).map(|(d, _)| d);
+        match decision {
+            Ok(d) => crate::print::to_schedule_mermaid(&d),
+            Err(_) => "flowchart LR\n  e[\"search produced no decision\"]".to_owned(),
+        }
+    }
+
+    pub fn llir_mermaid(
+        &self,
+        roots: &[NodeId],
+        config: &crate::core::compile::SearchConfig,
+    ) -> String {
+        use crate::core::dep::NoOpDependenceAnalyzer;
+        use crate::core::lower::lower;
+        use crate::core::schedule::ScheduleSearcher;
+
+        let graph = self
+            .graph
+            .lock()
+            .expect("Graph mutex should not be poisoned")
+            .clone();
+
+        let optimized = if config.enable_canonicalization {
+            canonicalize_with_roots(&graph, roots)
+        } else {
+            graph
+        };
+
+        let mut searcher = ScheduleSearcher::new(crate::core::cost::CpuHardwareModel::default());
+        searcher.beam_width = config.beam_width;
+        searcher.max_iterations = config.max_iterations;
+
+        let decision = match searcher.search_best(&optimized) {
+            Ok((d, _)) => d,
+            Err(_) => return "flowchart TD\n  e[\"search produced no decision\"]".to_owned(),
+        };
+
+        match lower(&optimized, &decision, &NoOpDependenceAnalyzer) {
+            Ok(program) => crate::print::to_llir_mermaid(&program),
+            Err(e) => format!("flowchart TD\n  e[\"lowering failed: {}\"]", e),
+        }
+    }
 }
 
 impl Default for Context {

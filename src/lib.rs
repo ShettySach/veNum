@@ -33,3 +33,4 @@ pub use core::schedule::{
 };
 pub use core::tensor::{Context, Tensor};
 pub use core::traits::{CodeGenerator, DependenceAnalyzer, ScheduleTransform};
+pub use print::{to_llir_mermaid, to_mermaid, to_schedule_mermaid};

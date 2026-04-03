@@ -1,4 +1,4 @@
-use venum::{Buffer, Context, DType, Tensor, run_context};
+use venum::{Buffer, Context, DType, SearchConfig, Tensor, run_context};
 
 fn main() -> anyhow::Result<()> {
     let cx = Context::new();
@@ -23,6 +23,21 @@ fn main() -> anyhow::Result<()> {
         "\nOptimized Mermaid graph:\n{}",
         cx.optimized_graph_mermaid(&[z.id()])
     );
+
+    let cfg = SearchConfig {
+        beam_width: 8,
+        max_iterations: 3,
+        ..SearchConfig::default()
+    };
+    println!(
+        "\nSchedule Mermaid:\n{}",
+        cx.schedule_mermaid(&[z.id()], &cfg)
+    );
+    println!(
+        "\nLLIR Mermaid (compact):\n{}",
+        cx.llir_mermaid(&[z.id()], &cfg)
+    );
+
     match &out[0] {
         Buffer::F32(v) => {
             println!("output len: {}", v.len());
