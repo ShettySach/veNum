@@ -106,6 +106,7 @@ pub fn egglog_algebraic(
                 &ctx.leaves,
                 &ctx.shape_meta,
                 &ctx.dtype_meta,
+                &ctx.permute_meta,
                 &mut out,
                 &mut decode_memo,
             );
@@ -165,14 +166,18 @@ struct EgglogContext<'a> {
     term_memo: HashMap<NodeId, String>,
     /// Leaf metadata, keyed by the integer id used in egglog terms.
     leaves: Vec<LeafKind>,
-    /// Shape metadata, keyed by integer id used in EReshape terms.
+    /// Shape metadata, keyed by integer id used in EReshape/EExpand terms.
     shape_meta: Vec<Vec<Dim>>,
     /// DType metadata, keyed by integer id used in ECast terms.
     dtype_meta: Vec<DType>,
+    /// Permute axes metadata, keyed by integer id used in EPermute terms.
+    permute_meta: Vec<Vec<usize>>,
     /// Dedup map for shape ids.
     shape_dedup: HashMap<Vec<Dim>, i64>,
     /// Dedup map for dtype ids.
     dtype_dedup: HashMap<DType, i64>,
+    /// Dedup map for permute axes ids.
+    permute_dedup: HashMap<Vec<usize>, i64>,
     /// Algebraic sub-roots that need egglog extraction (fed to barriers).
     algebraic_roots: Vec<(String, NodeId)>,
     /// Barrier nodes that need post-decode reconstruction.
@@ -190,8 +195,10 @@ impl<'a> EgglogContext<'a> {
             leaves: Vec::new(),
             shape_meta: Vec::new(),
             dtype_meta: Vec::new(),
+            permute_meta: Vec::new(),
             shape_dedup: HashMap::new(),
             dtype_dedup: HashMap::new(),
+            permute_dedup: HashMap::new(),
             algebraic_roots: Vec::new(),
             barriers: Vec::new(),
             built_map: HashMap::new(),
@@ -224,6 +231,16 @@ impl<'a> EgglogContext<'a> {
         id
     }
 
+    fn alloc_permute(&mut self, axes: Vec<usize>) -> i64 {
+        if let Some(&id) = self.permute_dedup.get(&axes) {
+            return id;
+        }
+        let id = self.permute_meta.len() as i64;
+        self.permute_dedup.insert(axes.clone(), id);
+        self.permute_meta.push(axes);
+        id
+    }
+
     fn is_algebraic(op: &Op) -> bool {
         matches!(
             op,
@@ -241,6 +258,8 @@ impl<'a> EgglogContext<'a> {
                 | Op::Max(_, _)
                 | Op::Min(_, _)
                 | Op::Reshape { .. }
+                | Op::Permute { .. }
+                | Op::Expand { .. }
         )
     }
 
@@ -379,6 +398,32 @@ impl<'a> EgglogContext<'a> {
                 format!("(EReshape {inner} {sid})")
             }
 
+            // Permute: encode with identity elimination
+            Op::Permute { input, axes } => {
+                let inner = self.encode(*input);
+                // Identity permute: [0, 1, 2, ...] for rank dimensions
+                let rank = self.src.ty(*input).shape.len();
+                let is_identity = axes.len() == rank && axes.iter().enumerate().all(|(i, &a)| a == i);
+                if is_identity {
+                    self.term_memo.insert(id, inner.clone());
+                    return inner;
+                }
+                let pid = self.alloc_permute(axes.clone());
+                format!("(EPermute {inner} {pid})")
+            }
+
+            // Expand: encode with identity elimination
+            Op::Expand { input, shape } => {
+                let inner = self.encode(*input);
+                if self.src.ty(*input).shape == *shape {
+                    // Identity expand — skip.
+                    self.term_memo.insert(id, inner.clone());
+                    return inner;
+                }
+                let sid = self.alloc_shape(shape.clone());
+                format!("(EExpand {inner} {sid})")
+            }
+
             // Barrier ops: don't create egglog terms. Process recursively.
             _ => {
                 self.encode_barrier(id);
@@ -445,13 +490,14 @@ fn decode_term(
     leaves: &[LeafKind],
     shapes: &[Vec<Dim>],
     dtypes: &[DType],
+    permutes: &[Vec<usize>],
     out: &mut HLIRGraph,
     memo: &mut HashMap<String, NodeId>,
 ) -> NodeId {
     if let Some(&id) = memo.get(term) {
         return id;
     }
-    let id = decode_inner(term, leaves, shapes, dtypes, out, memo);
+    let id = decode_inner(term, leaves, shapes, dtypes, permutes, out, memo);
     memo.insert(term.to_string(), id);
     id
 }
@@ -461,6 +507,7 @@ fn decode_inner(
     leaves: &[LeafKind],
     shapes: &[Vec<Dim>],
     dtypes: &[DType],
+    permutes: &[Vec<usize>],
     out: &mut HLIRGraph,
     memo: &mut HashMap<String, NodeId>,
 ) -> NodeId {
@@ -484,63 +531,75 @@ fn decode_inner(
         }
         "EAdd" => {
             let (a, b) = split_two_sexprs(rest);
-            let la = decode_term(a, leaves, shapes, dtypes, out, memo);
-            let lb = decode_term(b, leaves, shapes, dtypes, out, memo);
+            let la = decode_term(a, leaves, shapes, dtypes, permutes, out, memo);
+            let lb = decode_term(b, leaves, shapes, dtypes, permutes, out, memo);
             out.binary(la, lb, Op::Add)
         }
         "EMul" => {
             let (a, b) = split_two_sexprs(rest);
-            let la = decode_term(a, leaves, shapes, dtypes, out, memo);
-            let lb = decode_term(b, leaves, shapes, dtypes, out, memo);
+            let la = decode_term(a, leaves, shapes, dtypes, permutes, out, memo);
+            let lb = decode_term(b, leaves, shapes, dtypes, permutes, out, memo);
             out.binary(la, lb, Op::Mul)
         }
         "EMax" => {
             let (a, b) = split_two_sexprs(rest);
-            let la = decode_term(a, leaves, shapes, dtypes, out, memo);
-            let lb = decode_term(b, leaves, shapes, dtypes, out, memo);
+            let la = decode_term(a, leaves, shapes, dtypes, permutes, out, memo);
+            let lb = decode_term(b, leaves, shapes, dtypes, permutes, out, memo);
             out.binary(la, lb, Op::Max)
         }
         "EMin" => {
             let (a, b) = split_two_sexprs(rest);
-            let la = decode_term(a, leaves, shapes, dtypes, out, memo);
-            let lb = decode_term(b, leaves, shapes, dtypes, out, memo);
+            let la = decode_term(a, leaves, shapes, dtypes, permutes, out, memo);
+            let lb = decode_term(b, leaves, shapes, dtypes, permutes, out, memo);
             out.binary(la, lb, Op::Min)
         }
         "ENeg" => {
-            let c = decode_term(rest.trim(), leaves, shapes, dtypes, out, memo);
+            let c = decode_term(rest.trim(), leaves, shapes, dtypes, permutes, out, memo);
             out.unary(c, Op::Neg)
         }
         "ERecip" => {
-            let c = decode_term(rest.trim(), leaves, shapes, dtypes, out, memo);
+            let c = decode_term(rest.trim(), leaves, shapes, dtypes, permutes, out, memo);
             out.unary(c, Op::Recip)
         }
         "EExp" => {
-            let c = decode_term(rest.trim(), leaves, shapes, dtypes, out, memo);
+            let c = decode_term(rest.trim(), leaves, shapes, dtypes, permutes, out, memo);
             out.unary(c, Op::Exp)
         }
         "ELog" => {
-            let c = decode_term(rest.trim(), leaves, shapes, dtypes, out, memo);
+            let c = decode_term(rest.trim(), leaves, shapes, dtypes, permutes, out, memo);
             out.unary(c, Op::Log)
         }
         "ESqrt" => {
-            let c = decode_term(rest.trim(), leaves, shapes, dtypes, out, memo);
+            let c = decode_term(rest.trim(), leaves, shapes, dtypes, permutes, out, memo);
             out.unary(c, Op::Sqrt)
         }
         "ESin" => {
-            let c = decode_term(rest.trim(), leaves, shapes, dtypes, out, memo);
+            let c = decode_term(rest.trim(), leaves, shapes, dtypes, permutes, out, memo);
             out.unary(c, Op::Sin)
         }
         "EReshape" => {
             let (child_term, sid_str) = split_two_sexprs(rest);
-            let c = decode_term(child_term, leaves, shapes, dtypes, out, memo);
+            let c = decode_term(child_term, leaves, shapes, dtypes, permutes, out, memo);
             let sid: usize = sid_str.trim().parse().expect("shape id");
             out.reshape(c, shapes[sid].clone())
         }
         "ECast" => {
             let (child_term, did_str) = split_two_sexprs(rest);
-            let c = decode_term(child_term, leaves, shapes, dtypes, out, memo);
+            let c = decode_term(child_term, leaves, shapes, dtypes, permutes, out, memo);
             let did: usize = did_str.trim().parse().expect("dtype id");
             out.cast(c, dtypes[did])
+        }
+        "EPermute" => {
+            let (child_term, pid_str) = split_two_sexprs(rest);
+            let c = decode_term(child_term, leaves, shapes, dtypes, permutes, out, memo);
+            let pid: usize = pid_str.trim().parse().expect("permute id");
+            out.permute(c, permutes[pid].clone())
+        }
+        "EExpand" => {
+            let (child_term, sid_str) = split_two_sexprs(rest);
+            let c = decode_term(child_term, leaves, shapes, dtypes, permutes, out, memo);
+            let sid: usize = sid_str.trim().parse().expect("shape id");
+            out.expand(c, shapes[sid].clone())
         }
         other => panic!("unknown egglog constructor: {other}"),
     }
@@ -707,5 +766,83 @@ mod tests {
             "expected <= 2 nodes (Load + Reshape), got {}",
             opt.len()
         );
+    }
+
+    #[test]
+    fn permute_add_zero_eliminated() {
+        // Permute(Add(x, 0), axes) -> Permute(x, axes) (via add-zero elimination)
+        let mut g = HLIRGraph::new();
+        let x = g.load(BufferId(0), f32_ty(&[2, 3]));
+        let zero = g.constant(Scalar::F32(0.0), vec![Dim::Const(2), Dim::Const(3)], DType::F32);
+        let add = g.binary(x, zero, Op::Add);
+        let perm = g.permute(add, vec![1, 0]);
+
+        let (opt, remap) = egglog_algebraic(&g, &[perm]);
+        let out_root = remap[&perm];
+
+        // Should simplify to Permute(x, axes) without the Add.
+        assert!(
+            matches!(opt.node(out_root).op, Op::Permute { .. }),
+            "expected Permute at root, got {:?}",
+            opt.node(out_root).op.name()
+        );
+        // Graph should be just Load + Permute (no Add, no Const)
+        assert!(
+            opt.len() <= 2,
+            "expected <= 2 nodes (Load + Permute), got {}",
+            opt.len()
+        );
+    }
+
+    #[test]
+    fn expand_add_zero_eliminated() {
+        // Expand(Add(x, 0), shape) -> Expand(x, shape) (via add-zero elimination)
+        let mut g = HLIRGraph::new();
+        let x = g.load(BufferId(0), f32_ty(&[1, 4]));
+        let zero = g.constant(Scalar::F32(0.0), vec![Dim::Const(1), Dim::Const(4)], DType::F32);
+        let add = g.binary(x, zero, Op::Add);
+        let expanded = g.expand(add, vec![Dim::Const(4), Dim::Const(4)]);
+
+        let (opt, remap) = egglog_algebraic(&g, &[expanded]);
+        let out_root = remap[&expanded];
+
+        // Should simplify to Expand(x, shape) without the Add.
+        assert!(
+            matches!(opt.node(out_root).op, Op::Expand { .. }),
+            "expected Expand at root, got {:?}",
+            opt.node(out_root).op.name()
+        );
+        // Graph should be just Load + Expand (no Add, no Const)
+        assert!(
+            opt.len() <= 2,
+            "expected <= 2 nodes (Load + Expand), got {}",
+            opt.len()
+        );
+    }
+
+    #[test]
+    fn expand_expand_collapsed() {
+        // Expand(Expand(x, s1), s2) -> Expand(x, s2)
+        let mut g = HLIRGraph::new();
+        let x = g.load(BufferId(0), f32_ty(&[1, 4]));
+        let e1 = g.expand(x, vec![Dim::Const(2), Dim::Const(4)]);
+        let e2 = g.expand(e1, vec![Dim::Const(4), Dim::Const(4)]);
+
+        let (opt, remap) = egglog_algebraic(&g, &[e2]);
+        let out_root = remap[&e2];
+
+        // Should have collapsed to a single Expand directly from Load.
+        assert!(
+            matches!(opt.node(out_root).op, Op::Expand { .. }),
+            "expected Expand at root, got {:?}",
+            opt.node(out_root).op.name()
+        );
+        if let Op::Expand { input, .. } = &opt.node(out_root).op {
+            assert!(
+                matches!(opt.node(*input).op, Op::Load { .. }),
+                "expected Load directly under collapsed Expand, got {:?}",
+                opt.node(*input).op.name()
+            );
+        }
     }
 }

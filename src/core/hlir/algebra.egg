@@ -13,7 +13,9 @@
   (EMax Expr Expr)
   (EMin Expr Expr)
   (EReshape Expr i64)
-  (ECast Expr i64))
+  (ECast Expr i64)
+  (EPermute Expr i64)
+  (EExpand Expr i64))
 
 ;; Identity rules — oriented toward fewer ops
 (rewrite (EAdd ?x (Zero ?k)) ?x)
@@ -57,3 +59,44 @@
 (rewrite (EMul (EReshape ?x ?s) (EReshape ?y ?s)) (EReshape (EMul ?x ?y) ?s))
 (rewrite (EMax (EReshape ?x ?s) (EReshape ?y ?s)) (EReshape (EMax ?x ?y) ?s))
 (rewrite (EMin (EReshape ?x ?s) (EReshape ?y ?s)) (EReshape (EMin ?x ?y) ?s))
+
+;; Permute-permute collapse: Permute(Permute(x, p1), p2) can be composed
+;; Note: Composition requires runtime logic, so we only handle identity permute
+;; and permute sinking rules here.
+
+;; Permute sinking through unary ops
+(rewrite (ENeg (EPermute ?x ?p)) (EPermute (ENeg ?x) ?p))
+(rewrite (ERecip (EPermute ?x ?p)) (EPermute (ERecip ?x) ?p))
+(rewrite (EExp (EPermute ?x ?p)) (EPermute (EExp ?x) ?p))
+(rewrite (ELog (EPermute ?x ?p)) (EPermute (ELog ?x) ?p))
+(rewrite (ESqrt (EPermute ?x ?p)) (EPermute (ESqrt ?x) ?p))
+(rewrite (ESin (EPermute ?x ?p)) (EPermute (ESin ?x) ?p))
+
+;; Cast sinking through permute
+(rewrite (ECast (EPermute ?x ?p) ?d) (EPermute (ECast ?x ?d) ?p))
+
+;; Permute sinking through binary ops (both inputs same permute pattern)
+(rewrite (EAdd (EPermute ?x ?p) (EPermute ?y ?p)) (EPermute (EAdd ?x ?y) ?p))
+(rewrite (EMul (EPermute ?x ?p) (EPermute ?y ?p)) (EPermute (EMul ?x ?y) ?p))
+(rewrite (EMax (EPermute ?x ?p) (EPermute ?y ?p)) (EPermute (EMax ?x ?y) ?p))
+(rewrite (EMin (EPermute ?x ?p) (EPermute ?y ?p)) (EPermute (EMin ?x ?y) ?p))
+
+;; Expand-expand collapse: Expand(Expand(x, s1), s2) → Expand(x, s2)
+(rewrite (EExpand (EExpand ?x ?s1) ?s2) (EExpand ?x ?s2))
+
+;; Expand sinking through unary ops
+(rewrite (ENeg (EExpand ?x ?s)) (EExpand (ENeg ?x) ?s))
+(rewrite (ERecip (EExpand ?x ?s)) (EExpand (ERecip ?x) ?s))
+(rewrite (EExp (EExpand ?x ?s)) (EExpand (EExp ?x) ?s))
+(rewrite (ELog (EExpand ?x ?s)) (EExpand (ELog ?x) ?s))
+(rewrite (ESqrt (EExpand ?x ?s)) (EExpand (ESqrt ?x) ?s))
+(rewrite (ESin (EExpand ?x ?s)) (EExpand (ESin ?x) ?s))
+
+;; Cast sinking through expand
+(rewrite (ECast (EExpand ?x ?s) ?d) (EExpand (ECast ?x ?d) ?s))
+
+;; NOTE: Binary sinking rules for Expand are NOT included because they
+;; are only valid when inputs have identical shapes. Unlike Reshape,
+;; Expand involves broadcasting semantics that depend on input shapes.
+;; E.g., Mul(Expand(A,[2,3,2]), Expand(B,[2,3,2])) ≠ Expand(Mul(A,B),[2,3,2])
+;; when A has shape [2,3,1] and B has shape [1,3,2].
