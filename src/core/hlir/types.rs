@@ -206,4 +206,47 @@ impl TensorType {
             layout: Layout::Contiguous,
         }
     }
+
+    /// Create a TensorType with explicit strides.
+    pub fn strided(shape: Vec<Dim>, dtype: DType, strides: Vec<Dim>) -> Self {
+        Self {
+            shape,
+            dtype,
+            layout: Layout::Strided(strides),
+        }
+    }
+
+    /// Compute the contiguous strides for a shape (row-major order).
+    /// For shape [A, B, C], strides are [B*C, C, 1].
+    pub fn compute_contiguous_strides(shape: &[Dim]) -> Vec<Dim> {
+        if shape.is_empty() {
+            return vec![];
+        }
+        let mut strides = vec![Dim::constant(1); shape.len()];
+        for i in (0..shape.len() - 1).rev() {
+            strides[i] = strides[i + 1].clone() * shape[i + 1].clone();
+        }
+        strides
+    }
+
+    /// Get the effective strides for this tensor type.
+    /// Returns contiguous strides if layout is Contiguous.
+    pub fn strides(&self) -> Vec<Dim> {
+        match &self.layout {
+            Layout::Contiguous => Self::compute_contiguous_strides(&self.shape),
+            Layout::Strided(s) => s.clone(),
+            Layout::View { strides, .. } => strides.clone(),
+        }
+    }
+
+    /// Check if this tensor has a contiguous memory layout.
+    pub fn is_contiguous(&self) -> bool {
+        match &self.layout {
+            Layout::Contiguous => true,
+            Layout::Strided(strides) => *strides == Self::compute_contiguous_strides(&self.shape),
+            Layout::View { strides, .. } => {
+                *strides == Self::compute_contiguous_strides(&self.shape)
+            }
+        }
+    }
 }

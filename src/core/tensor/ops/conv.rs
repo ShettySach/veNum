@@ -9,6 +9,10 @@ impl Tensor {
     /// - `self` (input):  `[batch_size, channels_in, input_height, input_width]`
     /// - `weight`:        `[channels_out, channels_in, kernel_height, kernel_width]`
     /// - Output:          `[batch_size, channels_out, output_height, output_width]`
+    ///
+    /// Uses the tinygrad-style `_pool` trick: instead of iterating over each kernel
+    /// position, we use shape manipulation (expand with zero strides, permute, slice)
+    /// to create all sliding windows in a single graph fragment.
     pub fn conv2d(&self, weight: &Tensor) -> Result<Tensor> {
         if self.dtype != weight.dtype {
             bail!(
@@ -78,41 +82,132 @@ impl Tensor {
         let output_height = inp_height - kernel_height + 1;
         let output_width = inp_width - kernel_width + 1;
 
-        let mut accumulator: Option<Tensor> = None;
+        // Use _pool to create sliding windows
+        // Input: [batch, channels_in, height, width]
+        // Pooled: [batch, channels_in, out_height, out_width, kernel_height, kernel_width]
+        let pooled = self._pool2d(kernel_height, kernel_width, 1, 1)?;
 
-        for kernel_y in 0..kernel_height {
-            for kernel_x in 0..kernel_width {
-                let patch = self.slice(vec![
-                    (0, batch_size),
-                    (0, channels_in),
-                    (kernel_y, kernel_y + output_height),
-                    (kernel_x, kernel_x + output_width),
-                ])?;
-                let w_slice = weight.slice(vec![
-                    (0, channels_out),
-                    (0, channels_in),
-                    (kernel_y, kernel_y + 1),
-                    (kernel_x, kernel_x + 1),
-                ])?;
+        // Reshape weight for broadcasting:
+        // [channels_out, channels_in, kernel_height, kernel_width]
+        // -> [1, channels_out, channels_in, 1, 1, kernel_height, kernel_width]
+        let weight_reshaped = weight.reshape(vec![
+            1,
+            channels_out,
+            channels_in,
+            1,
+            1,
+            kernel_height,
+            kernel_width,
+        ])?;
 
-                let patch = patch.reshape(vec![
-                    batch_size,
-                    1,
-                    channels_in,
-                    output_height,
-                    output_width,
-                ])?;
-                let weight_slice = w_slice.reshape(vec![1, channels_out, channels_in, 1, 1])?;
+        // Reshape pooled for broadcasting:
+        // [batch, channels_in, out_height, out_width, kernel_height, kernel_width]
+        // -> [batch, 1, channels_in, out_height, out_width, kernel_height, kernel_width]
+        let pooled_reshaped = pooled.reshape(vec![
+            batch_size,
+            1,
+            channels_in,
+            output_height,
+            output_width,
+            kernel_height,
+            kernel_width,
+        ])?;
 
-                let prod_sum = patch.mul(&weight_slice)?.sum(&[2], false)?;
+        // Expand both for multiplication
+        let pooled_expanded = pooled_reshaped.expand(vec![
+            batch_size,
+            channels_out,
+            channels_in,
+            output_height,
+            output_width,
+            kernel_height,
+            kernel_width,
+        ])?;
+        let weight_expanded = weight_reshaped.expand(vec![
+            batch_size,
+            channels_out,
+            channels_in,
+            output_height,
+            output_width,
+            kernel_height,
+            kernel_width,
+        ])?;
 
-                accumulator = Some(match accumulator {
-                    Some(prev) => prev.add(&prod_sum)?,
-                    None => prod_sum,
-                });
-            }
+        // Multiply and reduce over channels_in, kernel_height, kernel_width (axes 2, 5, 6)
+        let result = pooled_expanded
+            .mul(&weight_expanded)?
+            .sum(&[2, 5, 6], false)?;
+
+        // Result shape: [batch, channels_out, out_height, out_width]
+        Ok(result)
+    }
+
+    /// Create sliding windows over 2D spatial dimensions (pool operation).
+    ///
+    /// Input: `[batch, channels, height, width]`
+    /// Output: `[batch, channels, out_height, out_width, kernel_height, kernel_width]`
+    ///
+    /// This uses the tinygrad trick: reshape to add kernel dimensions, then use
+    /// expand with zero strides to create overlapping windows without data copying.
+    fn _pool2d(
+        &self,
+        kernel_height: i64,
+        kernel_width: i64,
+        stride_h: i64,
+        stride_w: i64,
+    ) -> Result<Tensor> {
+        let batch = self.shape[0]
+            .as_const()
+            .ok_or_else(|| anyhow!("_pool2d requires constant batch"))?;
+        let channels = self.shape[1]
+            .as_const()
+            .ok_or_else(|| anyhow!("_pool2d requires constant channels"))?;
+        let height = self.shape[2]
+            .as_const()
+            .ok_or_else(|| anyhow!("_pool2d requires constant height"))?;
+        let width = self.shape[3]
+            .as_const()
+            .ok_or_else(|| anyhow!("_pool2d requires constant width"))?;
+
+        let out_height = (height - kernel_height) / stride_h + 1;
+        let out_width = (width - kernel_width) / stride_w + 1;
+
+        if stride_h == 1 && stride_w == 1 {
+            // Tinygrad-style pooling using expand with zero strides:
+            //
+            // 1. Reshape: [B, C, H, W] -> [B, C, 1, H, 1, W]
+            // 2. Expand:  [B, C, 1, H, 1, W] -> [B, C, out_H, H, out_W, W]
+            //    (dims 2 and 4 get zero strides - they index into the same data)
+            // 3. Slice:   [B, C, out_H, H, out_W, W] -> [B, C, out_H, kH, out_W, kW]
+            //    (extract valid kernel regions from H and W dims)
+            // 4. Permute: [B, C, out_H, kH, out_W, kW] -> [B, C, out_H, out_W, kH, kW]
+
+            // Step 1: Reshape to interleave output and input spatial dims
+            let reshaped = self.reshape(vec![batch, channels, 1, height, 1, width])?;
+
+            // Step 2: Expand the singleton dims to output size (zero strides)
+            let expanded =
+                reshaped.expand(vec![batch, channels, out_height, height, out_width, width])?;
+
+            // Step 3: Slice the H and W dims to kernel size
+            // For each output position, we want elements [0:kH] and [0:kW]
+            let sliced = expanded.slice(vec![
+                (0, batch),
+                (0, channels),
+                (0, out_height),
+                (0, kernel_height),
+                (0, out_width),
+                (0, kernel_width),
+            ])?;
+
+            // Step 4: Permute to [B, C, out_H, out_W, kH, kW]
+            let pooled = sliced.permute(vec![0, 1, 2, 4, 3, 5])?;
+
+            Ok(pooled)
+        } else {
+            // For stride > 1, we need to be more careful about which elements to pick
+            // This is a TODO for strided convolutions
+            bail!("_pool2d with stride > 1 not yet implemented")
         }
-
-        accumulator.ok_or_else(|| anyhow!("conv2d: empty kernel"))
     }
 }

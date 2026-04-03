@@ -118,42 +118,58 @@ impl HLIRGraph {
     }
 
     pub fn reshape(&mut self, input: NodeId, shape: Vec<Dim>) -> NodeId {
-        let mut out_ty = self.ty(input).clone();
-        out_ty.shape = shape.clone();
+        let in_ty = self.ty(input).clone();
+        // Reshape requires contiguous input (or produces contiguous output via copy)
+        // For strided inputs, the output is treated as contiguous (implicit copy)
+        let out_ty = TensorType::contiguous(shape.clone(), in_ty.dtype);
         self.add_node(Op::Reshape { input, shape }, out_ty)
     }
 
     pub fn permute(&mut self, input: NodeId, axes: Vec<usize>) -> NodeId {
         let in_ty = self.ty(input).clone();
-        let shape = axes.iter().map(|&i| in_ty.shape[i].clone()).collect();
-        let out_ty = TensorType {
-            shape,
-            dtype: in_ty.dtype,
-            layout: in_ty.layout.clone(),
-        };
+        let in_strides = in_ty.strides();
+        let shape: Vec<Dim> = axes.iter().map(|&i| in_ty.shape[i].clone()).collect();
+        let strides: Vec<Dim> = axes.iter().map(|&i| in_strides[i].clone()).collect();
+        let out_ty = TensorType::strided(shape, in_ty.dtype, strides);
         self.add_node(Op::Permute { input, axes }, out_ty)
     }
 
     pub fn slice(&mut self, input: NodeId, ranges: Vec<Range>) -> NodeId {
         let in_ty = self.ty(input).clone();
-        let shape = ranges
+        let in_strides = in_ty.strides();
+
+        let shape: Vec<Dim> = ranges
             .iter()
             .map(|r| match (&r.start, &r.end) {
                 (Dim::Const(s), Dim::Const(e)) => Dim::constant(e - s),
                 _ => r.end.clone() + Dim::constant(-1) * r.start.clone(),
             })
             .collect();
-        let out_ty = TensorType {
-            shape,
-            dtype: in_ty.dtype,
-            layout: in_ty.layout.clone(),
-        };
+
+        // Slice preserves strides but changes the effective view
+        let out_ty = TensorType::strided(shape, in_ty.dtype, in_strides);
         self.add_node(Op::Slice { input, ranges }, out_ty)
     }
 
     pub fn expand(&mut self, input: NodeId, shape: Vec<Dim>) -> NodeId {
-        let mut out_ty = self.ty(input).clone();
-        out_ty.shape = shape.clone();
+        let in_ty = self.ty(input).clone();
+        let in_strides = in_ty.strides();
+
+        // Compute output strides: if input dim is 1 and output dim > 1, stride = 0
+        let out_strides: Vec<Dim> = in_ty
+            .shape
+            .iter()
+            .zip(shape.iter())
+            .zip(in_strides.iter())
+            .map(|((in_dim, out_dim), in_stride)| {
+                match (in_dim.as_const(), out_dim.as_const()) {
+                    (Some(1), Some(out_d)) if out_d > 1 => Dim::constant(0), // Broadcast: zero stride
+                    _ => in_stride.clone(),                                  // Keep original stride
+                }
+            })
+            .collect();
+
+        let out_ty = TensorType::strided(shape.clone(), in_ty.dtype, out_strides);
         self.add_node(Op::Expand { input, shape }, out_ty)
     }
 
