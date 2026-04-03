@@ -5,6 +5,6 @@ pub mod native;
 #[cfg(test)]
 mod tests;
 
-pub use access_map::{strides_to_access, AccessMap};
-pub use domain::{shape_to_domain, Aff, Constraint, Domain, PolyVar};
+pub use access_map::{AccessMap, strides_to_access};
+pub use domain::{Aff, Constraint, Domain, PolyVar, shape_to_domain};
 pub use native::NativeDependenceAnalyzer;

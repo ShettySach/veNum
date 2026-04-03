@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::core::hlir::{canonicalize_with_roots_and_map, HLIRGraph, NodeId};
+use crate::core::hlir::{HLIRGraph, NodeId, canonicalize_with_roots_and_map};
 use crate::core::llir::LLIRProgram;
 use crate::core::lower::lower;
 use crate::core::schedule::{HardwareModel, ScheduleSearcher};

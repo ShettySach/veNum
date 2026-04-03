@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 
 use crate::core::hlir::BufferId;
 use crate::core::llir::affine::AffineExpr;

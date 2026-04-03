@@ -1,10 +1,10 @@
 #[cfg(test)]
-mod tests {
+mod poly_tests {
     use anyhow::Result;
 
     use crate::core::hlir::{BufferId, DType, Dim, HLIRGraph, Op, TensorType};
     use crate::core::lower::lower;
-    use crate::core::poly::{shape_to_domain, strides_to_access, NativeDependenceAnalyzer};
+    use crate::core::poly::{NativeDependenceAnalyzer, shape_to_domain, strides_to_access};
     use crate::core::schedule::search::{ScheduleSearcher, TrivialHardware};
     use crate::core::traits::{DependenceAnalyzer, ScheduleTransform};
 

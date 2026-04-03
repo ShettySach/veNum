@@ -1,6 +1,6 @@
 //! Core tensor operations: binary_op and unary_op.
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 
 use crate::core::hlir::decompose;
 use crate::core::hlir::{Dim, NodeId, Op};
@@ -39,12 +39,7 @@ impl Tensor {
 
     /// Broadcast a tensor's node to match the target shape, inserting
     /// reshape+expand ops as needed. Returns the (possibly new) node id.
-    fn broadcast_to_shape(
-        &self,
-        node_id: NodeId,
-        node_shape: &[Dim],
-        target: &[Dim],
-    ) -> NodeId {
+    fn broadcast_to_shape(&self, node_id: NodeId, node_shape: &[Dim], target: &[Dim]) -> NodeId {
         if node_shape == target {
             return node_id;
         }

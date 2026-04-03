@@ -2,7 +2,7 @@
 mod tests {
     use anyhow::Result;
 
-    use crate::core::compile::{compile, SearchConfig};
+    use crate::core::compile::{SearchConfig, compile};
     use crate::core::cpu::{Buffer, CpuCodeGenerator};
     use crate::core::dep::NoOpDependenceAnalyzer;
     use crate::core::hlir::{BufferId, DType, Dim, HLIRGraph, Op, TensorType};
@@ -206,8 +206,10 @@ mod tests {
         let r1 = g.reshape(a, vec![Dim::Const(2), Dim::Const(2)]);
         let r2 = g.reshape(r1, vec![Dim::Const(4)]);
 
-        let mut config = SearchConfig::default();
-        config.enable_canonicalization = false;
+        let config = SearchConfig {
+            enable_canonicalization: false,
+            ..SearchConfig::default()
+        };
 
         let cg = CpuCodeGenerator::new(vec![r2]);
         let module = compile(

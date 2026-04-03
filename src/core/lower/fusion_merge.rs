@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 
 use crate::core::hlir::{HLIRGraph, NodeId};
 use crate::core::llir::program::Kernel;

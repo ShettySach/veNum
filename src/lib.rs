@@ -23,8 +23,8 @@ pub use core::llir::{
     LLIRProgram, Loop, LoopKind, LoopNest, MemoryAccess, Stmt, Var,
 };
 pub use core::poly::{
-    shape_to_domain, strides_to_access, AccessMap, Aff, Constraint, Domain,
-    NativeDependenceAnalyzer, PolyVar,
+    AccessMap, Aff, Constraint, Domain, NativeDependenceAnalyzer, PolyVar, shape_to_domain,
+    strides_to_access,
 };
 pub use core::runner::run_context;
 pub use core::schedule::{

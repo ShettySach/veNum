@@ -1,7 +1,7 @@
+use super::Dim;
 use super::graph::HLIRGraph;
 use super::op::ReduceOp;
 use super::types::{NodeId, Scalar};
-use super::Dim;
 
 pub fn sub(graph: &mut HLIRGraph, lhs: NodeId, rhs: NodeId) -> NodeId {
     let neg_rhs = graph.unary(rhs, super::op::Op::Neg);

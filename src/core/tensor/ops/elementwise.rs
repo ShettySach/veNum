@@ -1,8 +1,8 @@
 //! Elementwise operations for tensors.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
-use crate::core::hlir::{decompose, Op};
+use crate::core::hlir::{Op, decompose};
 
 use crate::core::tensor::structure::Tensor;
 

@@ -1,4 +1,4 @@
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 
 use super::dim::Dim;
 use super::types::{BufferId, DType, NodeId, Scalar};

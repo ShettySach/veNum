@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::core::hlir::{canonicalize_with_roots, BufferId, HLIRGraph, NodeId, Op};
+use crate::core::hlir::{BufferId, HLIRGraph, NodeId, Op, canonicalize_with_roots};
 
 /// Execution context for tensors.
 ///

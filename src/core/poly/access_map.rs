@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use crate::core::hlir::Dim;
 use crate::core::llir::MemoryAccess;
@@ -47,11 +47,9 @@ pub fn memory_access_to_access_map(access: &MemoryAccess, loop_vars: &[String]) 
             terms: idx
                 .terms
                 .iter()
-                .filter_map(|(coeff, v)| match v {
-                    crate::core::llir::Var::Loop(name) => {
-                        Some((*coeff, PolyVar::Iter(name.clone())))
-                    }
-                    crate::core::llir::Var::Param(sym) => Some((*coeff, PolyVar::Param(*sym))),
+                .map(|(coeff, v)| match v {
+                    crate::core::llir::Var::Loop(name) => (*coeff, PolyVar::Iter(name.clone())),
+                    crate::core::llir::Var::Param(sym) => (*coeff, PolyVar::Param(*sym)),
                 })
                 .collect(),
         })
