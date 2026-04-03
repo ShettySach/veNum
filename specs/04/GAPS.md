@@ -1,0 +1,1 @@
+Fusion is represented more richly than it is realized. The spec spends real effort on Chain, FanIn, FanOut, and DAG lowering in specs/04/SPEC.md, and the types exist in src/core/schedule/decision.rs, but the lowerer only accepts Chain. So the shape of the design is there, but the implemented fusion model is still “single node or simple linear chain.”

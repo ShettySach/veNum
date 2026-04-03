@@ -4,7 +4,7 @@
 //! into egglog terms, runs saturation with rewrite rules, extracts the
 //! optimal (smallest) term, and decodes back to an HLIRGraph.
 //!
-//! Non-algebraic ops (Reduce, Permute, Slice, Expand, Concat, etc.) are
+//! Non-algebraic ops (Reduce, Slice, Concat, etc.) are
 //! treated as opaque barriers — their inputs are optimized recursively but
 //! the ops themselves are not represented in the e-graph.
 
@@ -403,7 +403,8 @@ impl<'a> EgglogContext<'a> {
                 let inner = self.encode(*input);
                 // Identity permute: [0, 1, 2, ...] for rank dimensions
                 let rank = self.src.ty(*input).shape.len();
-                let is_identity = axes.len() == rank && axes.iter().enumerate().all(|(i, &a)| a == i);
+                let is_identity =
+                    axes.len() == rank && axes.iter().enumerate().all(|(i, &a)| a == i);
                 if is_identity {
                     self.term_memo.insert(id, inner.clone());
                     return inner;
@@ -773,7 +774,11 @@ mod tests {
         // Permute(Add(x, 0), axes) -> Permute(x, axes) (via add-zero elimination)
         let mut g = HLIRGraph::new();
         let x = g.load(BufferId(0), f32_ty(&[2, 3]));
-        let zero = g.constant(Scalar::F32(0.0), vec![Dim::Const(2), Dim::Const(3)], DType::F32);
+        let zero = g.constant(
+            Scalar::F32(0.0),
+            vec![Dim::Const(2), Dim::Const(3)],
+            DType::F32,
+        );
         let add = g.binary(x, zero, Op::Add);
         let perm = g.permute(add, vec![1, 0]);
 
@@ -799,7 +804,11 @@ mod tests {
         // Expand(Add(x, 0), shape) -> Expand(x, shape) (via add-zero elimination)
         let mut g = HLIRGraph::new();
         let x = g.load(BufferId(0), f32_ty(&[1, 4]));
-        let zero = g.constant(Scalar::F32(0.0), vec![Dim::Const(1), Dim::Const(4)], DType::F32);
+        let zero = g.constant(
+            Scalar::F32(0.0),
+            vec![Dim::Const(1), Dim::Const(4)],
+            DType::F32,
+        );
         let add = g.binary(x, zero, Op::Add);
         let expanded = g.expand(add, vec![Dim::Const(4), Dim::Const(4)]);
 

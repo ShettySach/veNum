@@ -85,7 +85,11 @@ fn copy_reachable(
 pub(super) fn remap_op_inputs(op: &Op, new_inputs: &[NodeId]) -> Op {
     let mut it = new_inputs.iter().copied();
     match op {
-        Op::Const { value, shape, dtype } => Op::Const {
+        Op::Const {
+            value,
+            shape,
+            dtype,
+        } => Op::Const {
             value: value.clone(),
             shape: shape.clone(),
             dtype: *dtype,
@@ -163,9 +167,7 @@ pub(super) fn remap_op_inputs(op: &Op, new_inputs: &[NodeId]) -> Op {
             shape: shape.clone(),
         },
         Op::Concat { axis, inputs } => Op::Concat {
-            inputs: (0..inputs.len())
-                .map(|_| it.next().unwrap())
-                .collect(),
+            inputs: (0..inputs.len()).map(|_| it.next().unwrap()).collect(),
             axis: *axis,
         },
     }
