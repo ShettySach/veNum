@@ -1,4 +1,4 @@
-use venum::{run_context, Buffer, Context, DType, Tensor};
+use venum::{Buffer, Context, DType, Tensor, run_context};
 
 fn main() -> anyhow::Result<()> {
     let cx = Context::new();
@@ -10,7 +10,7 @@ fn main() -> anyhow::Result<()> {
     let output_conv2d_tg = input.conv2d_tg(&weight)?;
 
     let input_data: Vec<f32> = (1..=25).map(|i| i as f32).collect();
-    let weight_data: Vec<f32> = vec![1.0, 1.0, -1.0, 1.0, 0.0, -1.0, 1.0, 1.0, -1.0];
+    let weight_data: Vec<f32> = vec![1.0, 0.0, -1.0, 1.0, 0.0, -1.0, 1.0, 0.0, -1.0];
 
     let out_conv2d = run_context(
         &cx,

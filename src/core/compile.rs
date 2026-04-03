@@ -87,7 +87,7 @@ where
     // Try each schedule candidate
     for (decision, _cost) in candidates {
         // Lower to LLIR
-        let llir = match lower(&hlir, &decision) {
+        let llir = match lower(&hlir, &decision, dep) {
             Ok(v) => v,
             Err(e) => {
                 last_err = Some(e.context("lowering candidate failed"));

@@ -2,6 +2,7 @@
 mod tests {
     use anyhow::Result;
 
+    use crate::core::dep::NoOpDependenceAnalyzer;
     use crate::core::hlir::{BufferId, DType, Dim, HLIRGraph, Op, ReduceOp, TensorType};
     use crate::core::llir::{LoopKind, Var};
     use crate::core::lower::lower;
@@ -25,7 +26,7 @@ mod tests {
         let _c = g.binary(a, b, Op::Add);
 
         let decision = ScheduleSearcher::new(TrivialHardware).search_best(&g)?.0;
-        let llir = lower(&g, &decision)?;
+        let llir = lower(&g, &decision, &NoOpDependenceAnalyzer)?;
         assert_eq!(llir.kernels.len(), 3);
         let k = llir.kernels.last().unwrap();
         assert_eq!(k.loop_nest.loops.len(), 1);
@@ -41,7 +42,7 @@ mod tests {
         let _r = g.reduce(a, vec![1], ReduceOp::Sum, false);
 
         let decision = ScheduleSearcher::new(TrivialHardware).search_best(&g)?.0;
-        let llir = lower(&g, &decision)?;
+        let llir = lower(&g, &decision, &NoOpDependenceAnalyzer)?;
         let k = llir.kernels.last().unwrap();
         assert!(k
             .loop_nest

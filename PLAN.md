@@ -84,6 +84,9 @@ The spec requires a **two-IR architecture** (HLIR → ScheduleDecision → LLIR 
 3. **`lower/legality.rs`** — Incremental legality checking per §5.1.2 (stub `DependenceAnalyzer` that always returns legal for now)
 4. **`lower/fusion_merge.rs`** — Fused nest merging per §8 step 4: `Chain` (inline producer), `FanIn`, `FanOut`, `DAG`
 
+**Gap**:
+Fusion is represented more richly than it is realized. The spec spends real effort on Chain, FanIn, FanOut, and DAG lowering in specs/04/SPEC.md, and the types exist in src/core/schedule/decision.rs, but the lowerer only accepts Chain. So the shape of the design is there, but the implemented fusion model is still “single node or simple linear chain.”
+
 **Tests**: Matmul worked example from §11.1 (tile M, N, K → parallelize → vectorize). Verify axis indices shift correctly. GroupReduce produces barrier.
 
 ---
