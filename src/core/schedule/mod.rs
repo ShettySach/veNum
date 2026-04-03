@@ -1,3 +1,5 @@
+pub mod beam;
+pub mod candidates;
 pub mod decision;
 pub mod fusion;
 pub mod opt;

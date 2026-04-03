@@ -14,6 +14,7 @@ mod core;
 mod print;
 
 pub use core::compile::{SearchConfig, compile};
+pub use core::cost::{CpuHardwareModel, roofline_estimate};
 pub use core::cpu::{Buffer, CpuCodeGenerator, CpuModule};
 pub use core::dep::NoOpDependenceAnalyzer;
 pub use core::hlir::{BufferId, DType, Dim, HLIRGraph, NodeId, Scalar, Symbol};

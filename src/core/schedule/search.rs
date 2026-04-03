@@ -1,6 +1,8 @@
 use crate::core::hlir::{DType, HLIRGraph};
 
+use super::beam::run_beam_search;
 use super::decision::{FusionGroup, FusionGroupId, FusionTopology, ScheduleDecision};
+use super::opt::Opt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BackendClass {
@@ -29,6 +31,7 @@ pub struct CostEstimate {
 
 pub trait HardwareModel {
     fn estimate_cost(&self, _ctx: &KernelContext) -> CostEstimate;
+    fn opt_candidates(&self, _ctx: &KernelContext) -> Vec<Opt>;
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -37,6 +40,10 @@ pub struct TrivialHardware;
 impl HardwareModel for TrivialHardware {
     fn estimate_cost(&self, _ctx: &KernelContext) -> CostEstimate {
         CostEstimate::default()
+    }
+
+    fn opt_candidates(&self, _ctx: &KernelContext) -> Vec<Opt> {
+        Vec::new()
     }
 }
 
@@ -70,14 +77,27 @@ impl<H: HardwareModel> ScheduleSearcher<H> {
             decision.opts.insert(g.id, Vec::new());
         }
 
-        let cost = self.hardware.estimate_cost(&KernelContext {
+        let seed_cost = self.hardware.estimate_cost(&KernelContext {
             loop_bounds: Vec::new(),
             reduce_axes: Vec::new(),
             dtype: DType::F32,
             shared_budget: 0,
             backend: BackendClass::Cpu,
         });
-        vec![(decision, cost)]
+
+        let ranked = run_beam_search(
+            hlir,
+            &self.hardware,
+            decision.clone(),
+            self.beam_width,
+            self.max_iterations,
+        );
+
+        if ranked.is_empty() {
+            vec![(decision, seed_cost)]
+        } else {
+            ranked
+        }
     }
 
     pub fn search_best(

@@ -1,4 +1,5 @@
 pub mod compile;
+pub mod cost;
 pub mod cpu;
 pub mod dep;
 pub mod hlir;
