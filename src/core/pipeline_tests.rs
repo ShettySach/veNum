@@ -2,7 +2,7 @@
 mod tests {
     use anyhow::Result;
 
-    use crate::core::compile::{SearchConfig, compile};
+    use crate::core::compile::{compile, SearchConfig};
     use crate::core::cpu::{Buffer, CpuCodeGenerator};
     use crate::core::dep::NoOpDependenceAnalyzer;
     use crate::core::hlir::{BufferId, DType, Dim, HLIRGraph, Op, TensorType};
@@ -162,6 +162,33 @@ mod tests {
                     v,
                     &vec![-6.0, -6.0, -6.0, -6.0, -6.0, -6.0, -6.0, -6.0, -6.0]
                 );
+            }
+            _ => panic!("unexpected output dtype"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn end_to_end_conv2d_center_kernel_preserves_spatial_variation() -> Result<()> {
+        let cx = crate::core::tensor::Context::new();
+        let input = crate::core::tensor::Tensor::placeholder(&cx, DType::F32, vec![1, 1, 5, 5]);
+        let weight = crate::core::tensor::Tensor::placeholder(&cx, DType::F32, vec![1, 1, 3, 3]);
+        let out = input.conv2d(&weight)?;
+
+        let result = crate::core::runner::run_context(
+            &cx,
+            &[out.id()],
+            &[
+                Buffer::F32((1..=25).map(|v| v as f32).collect()),
+                Buffer::F32(vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]),
+            ],
+        )?;
+
+        match &result[0] {
+            Buffer::F32(v) => {
+                assert_eq!(v.len(), 9);
+                assert_eq!(v, &vec![7.0, 8.0, 9.0, 12.0, 13.0, 14.0, 17.0, 18.0, 19.0]);
             }
             _ => panic!("unexpected output dtype"),
         }

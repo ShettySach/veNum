@@ -7,13 +7,13 @@ __   _____  /\ \ \_   _ _ __ ___
   \_/ \___\_\ \/  \__,_|_| |_| |_|
 ```
 
-Vectorized _N_-dimensional numericals
+Vectorized N-dimensional numericals
 */
 
 mod core;
 mod print;
 
-pub use core::compile::{compile, SearchConfig};
+pub use core::compile::{SearchConfig, compile};
 pub use core::cpu::{Buffer, CpuCodeGenerator, CpuModule};
 pub use core::dep::NoOpDependenceAnalyzer;
 pub use core::hlir::{BufferId, DType, Dim, HLIRGraph, NodeId, Scalar, Symbol};

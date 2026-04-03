@@ -173,35 +173,42 @@ impl Tensor {
         let out_width = (width - kernel_width) / stride_w + 1;
 
         if stride_h == 1 && stride_w == 1 {
-            // Tinygrad-style pooling using expand with zero strides:
-            //
-            // 1. Reshape: [B, C, H, W] -> [B, C, 1, H, 1, W]
-            // 2. Expand:  [B, C, 1, H, 1, W] -> [B, C, out_H, H, out_W, W]
-            //    (dims 2 and 4 get zero strides - they index into the same data)
-            // 3. Slice:   [B, C, out_H, H, out_W, W] -> [B, C, out_H, kH, out_W, kW]
-            //    (extract valid kernel regions from H and W dims)
-            // 4. Permute: [B, C, out_H, kH, out_W, kW] -> [B, C, out_H, out_W, kH, kW]
+            // Build all kernel-offset slices, then concatenate them into
+            // [B, C, out_H, out_W, kH, kW].
+            let mut patches: Vec<Tensor> =
+                Vec::with_capacity((kernel_height * kernel_width) as usize);
 
-            // Step 1: Reshape to interleave output and input spatial dims
-            let reshaped = self.reshape(vec![batch, channels, 1, height, 1, width])?;
+            for ky in 0..kernel_height {
+                for kx in 0..kernel_width {
+                    let patch = self
+                        .slice(vec![
+                            (0, batch),
+                            (0, channels),
+                            (ky, ky + out_height),
+                            (kx, kx + out_width),
+                        ])?
+                        .reshape(vec![batch, channels, out_height, out_width, 1, 1])?;
+                    patches.push(patch);
+                }
+            }
 
-            // Step 2: Expand the singleton dims to output size (zero strides)
-            let expanded =
-                reshaped.expand(vec![batch, channels, out_height, height, out_width, width])?;
+            let mut rows: Vec<Tensor> = Vec::with_capacity(kernel_height as usize);
+            for ky in 0..kernel_height {
+                let start = (ky * kernel_width) as usize;
+                let end = ((ky + 1) * kernel_width) as usize;
+                let row_patches = &patches[start..end];
 
-            // Step 3: Slice the H and W dims to kernel size
-            // For each output position, we want elements [0:kH] and [0:kW]
-            let sliced = expanded.slice(vec![
-                (0, batch),
-                (0, channels),
-                (0, out_height),
-                (0, kernel_height),
-                (0, out_width),
-                (0, kernel_width),
-            ])?;
+                let mut row = row_patches[0].clone();
+                for patch in &row_patches[1..] {
+                    row = row.concat(patch, 5)?;
+                }
+                rows.push(row);
+            }
 
-            // Step 4: Permute to [B, C, out_H, out_W, kH, kW]
-            let pooled = sliced.permute(vec![0, 1, 2, 4, 3, 5])?;
+            let mut pooled = rows[0].clone();
+            for row in &rows[1..] {
+                pooled = pooled.concat(row, 4)?;
+            }
 
             Ok(pooled)
         } else {

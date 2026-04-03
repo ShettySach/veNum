@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 
 use crate::core::compile::OutputRemapper;
-use crate::core::hlir::{BufferId, DType, Dim, NodeId, Op, Scalar, op::CmpOp};
+use crate::core::hlir::{op::CmpOp, BufferId, DType, Dim, NodeId, Op, Scalar, TensorType};
 use crate::core::llir::LLIRProgram;
 use crate::core::traits::CodeGenerator;
 
@@ -107,7 +107,7 @@ fn eval_node(
         }
     }
 
-    let v = eval_op(&k.op, &k.ty.shape, k.ty.dtype, values, inputs)?;
+    let v = eval_op(&k.op, &k.ty, values, inputs)?;
     values.insert(id, v.clone());
     visiting.insert(id, false);
     Ok(v)
@@ -120,6 +120,8 @@ fn op_inputs(op: &Op) -> smallvec::SmallVec<[NodeId; 3]> {
 #[derive(Clone, Debug)]
 struct TensorValue {
     shape: Vec<usize>,
+    strides: Vec<usize>,
+    offset: usize,
     dtype: DType,
     data: Vec<f64>,
 }
@@ -130,31 +132,80 @@ impl TensorValue {
     }
 
     fn to_buffer(&self) -> Buffer {
+        let materialized = self.materialize_contiguous();
         match self.dtype {
-            DType::F32 => Buffer::F32(self.data.iter().map(|x| *x as f32).collect()),
-            DType::F64 => Buffer::F64(self.data.clone()),
-            DType::I32 => Buffer::I32(self.data.iter().map(|x| *x as i32).collect()),
-            DType::I64 => Buffer::I64(self.data.iter().map(|x| *x as i64).collect()),
-            DType::Bool => Buffer::Bool(self.data.iter().map(|x| *x != 0.0).collect()),
-            _ => Buffer::F64(self.data.clone()),
+            DType::F32 => Buffer::F32(materialized.iter().map(|x| *x as f32).collect()),
+            DType::F64 => Buffer::F64(materialized),
+            DType::I32 => Buffer::I32(materialized.iter().map(|x| *x as i32).collect()),
+            DType::I64 => Buffer::I64(materialized.iter().map(|x| *x as i64).collect()),
+            DType::Bool => Buffer::Bool(materialized.iter().map(|x| *x != 0.0).collect()),
+            _ => Buffer::F64(materialized),
+        }
+    }
+
+    fn contiguous_strides(shape: &[usize]) -> Vec<usize> {
+        compute_strides(shape)
+    }
+
+    fn is_contiguous(&self) -> bool {
+        self.offset == 0 && self.strides == Self::contiguous_strides(&self.shape)
+    }
+
+    fn get_flat(&self, logical_flat: usize) -> f64 {
+        let coord = unravel_index(logical_flat, &self.shape);
+        self.get_coord(&coord)
+    }
+
+    fn get_coord(&self, coord: &[usize]) -> f64 {
+        let storage_index = self.offset
+            + coord
+                .iter()
+                .zip(&self.strides)
+                .map(|(c, s)| c * s)
+                .sum::<usize>();
+        self.data[storage_index]
+    }
+
+    fn materialize_contiguous(&self) -> Vec<f64> {
+        let numel = self.numel();
+        let mut out = vec![0.0; numel];
+        for (i, slot) in out.iter_mut().enumerate() {
+            *slot = self.get_flat(i);
+        }
+        out
+    }
+
+    fn as_contiguous(&self) -> TensorValue {
+        if self.is_contiguous() {
+            self.clone()
+        } else {
+            TensorValue {
+                shape: self.shape.clone(),
+                strides: Self::contiguous_strides(&self.shape),
+                offset: 0,
+                dtype: self.dtype,
+                data: self.materialize_contiguous(),
+            }
         }
     }
 }
 
 fn eval_op(
     op: &Op,
-    shape_dims: &[Dim],
-    dtype: DType,
+    ty: &TensorType,
     values: &HashMap<NodeId, TensorValue>,
     inputs: &HashMap<BufferId, Buffer>,
 ) -> Result<TensorValue> {
-    let shape = dims_to_shape(shape_dims)?;
+    let shape = dims_to_shape(&ty.shape)?;
+    let dtype = ty.dtype;
     let out = match op {
         Op::Load { buffer } => from_input(*buffer, &shape, dtype, inputs)?,
         Op::Const { value, .. } => {
             let numel: usize = shape.iter().product();
             TensorValue {
-                shape,
+                shape: shape.clone(),
+                strides: TensorValue::contiguous_strides(&shape),
+                offset: 0,
                 dtype,
                 data: vec![scalar_to_f64(value); numel],
             }
@@ -170,12 +221,27 @@ fn eval_op(
         Op::Sqrt(a) => unary(values, *a, |x| x.sqrt())?,
         Op::Sin(a) => unary(values, *a, |x| x.sin())?,
         Op::Reshape { input, .. } => {
-            let mut v = values
+            let v = values
                 .get(input)
                 .ok_or_else(|| anyhow::anyhow!("missing reshape input"))?
                 .clone();
-            v.shape = shape;
-            v
+            if v.is_contiguous() {
+                TensorValue {
+                    shape: shape.clone(),
+                    strides: TensorValue::contiguous_strides(&shape),
+                    offset: 0,
+                    dtype: v.dtype,
+                    data: v.data,
+                }
+            } else {
+                TensorValue {
+                    shape: shape.clone(),
+                    strides: TensorValue::contiguous_strides(&shape),
+                    offset: 0,
+                    dtype: v.dtype,
+                    data: v.materialize_contiguous(),
+                }
+            }
         }
         Op::Expand { input, .. } => {
             let v = values
@@ -236,21 +302,23 @@ fn eval_op(
             if l.shape != r.shape {
                 bail!("cmp shape mismatch");
             }
-            let data = l
-                .data
-                .iter()
-                .zip(&r.data)
-                .map(|(a, b)| match op {
-                    CmpOp::Eq => (*a == *b) as i32 as f64,
-                    CmpOp::Ne => (*a != *b) as i32 as f64,
-                    CmpOp::Lt => (*a < *b) as i32 as f64,
-                    CmpOp::Le => (*a <= *b) as i32 as f64,
-                    CmpOp::Gt => (*a > *b) as i32 as f64,
-                    CmpOp::Ge => (*a >= *b) as i32 as f64,
-                })
-                .collect();
+            let mut data = Vec::with_capacity(l.numel());
+            for i in 0..l.numel() {
+                let a = l.get_flat(i);
+                let b = r.get_flat(i);
+                data.push(match op {
+                    CmpOp::Eq => (a == b) as i32 as f64,
+                    CmpOp::Ne => (a != b) as i32 as f64,
+                    CmpOp::Lt => (a < b) as i32 as f64,
+                    CmpOp::Le => (a <= b) as i32 as f64,
+                    CmpOp::Gt => (a > b) as i32 as f64,
+                    CmpOp::Ge => (a >= b) as i32 as f64,
+                });
+            }
             TensorValue {
                 shape: l.shape.clone(),
+                strides: TensorValue::contiguous_strides(&l.shape),
+                offset: 0,
                 dtype: DType::Bool,
                 data,
             }
@@ -269,15 +337,18 @@ fn eval_op(
             let e = values
                 .get(else_val)
                 .ok_or_else(|| anyhow::anyhow!("missing where else"))?;
-            let data = c
-                .data
-                .iter()
-                .zip(&t.data)
-                .zip(&e.data)
-                .map(|((cc, tt), ee)| if *cc != 0.0 { *tt } else { *ee })
-                .collect();
+            let mut data = Vec::with_capacity(t.numel());
+            for i in 0..t.numel() {
+                data.push(if c.get_flat(i) != 0.0 {
+                    t.get_flat(i)
+                } else {
+                    e.get_flat(i)
+                });
+            }
             TensorValue {
                 shape: t.shape.clone(),
+                strides: TensorValue::contiguous_strides(&t.shape),
+                offset: 0,
                 dtype: t.dtype,
                 data,
             }
@@ -355,6 +426,8 @@ fn from_input(
     }
     Ok(TensorValue {
         shape: shape.to_vec(),
+        strides: TensorValue::contiguous_strides(shape),
+        offset: 0,
         dtype,
         data,
     })
@@ -368,10 +441,13 @@ fn unary(
     let v = values
         .get(&a)
         .ok_or_else(|| anyhow::anyhow!("missing unary input"))?;
+    let vc = v.as_contiguous();
     Ok(TensorValue {
-        shape: v.shape.clone(),
-        dtype: v.dtype,
-        data: v.data.iter().map(|x| f(*x)).collect(),
+        shape: vc.shape.clone(),
+        strides: TensorValue::contiguous_strides(&vc.shape),
+        offset: 0,
+        dtype: vc.dtype,
+        data: vc.data.iter().map(|x| f(*x)).collect(),
     })
 }
 
@@ -390,25 +466,26 @@ fn binary(
     if l.numel() != r.numel() {
         bail!("binary size mismatch");
     }
+    let mut out = vec![0.0; l.numel()];
+    for (i, slot) in out.iter_mut().enumerate() {
+        *slot = f(l.get_flat(i), r.get_flat(i));
+    }
     Ok(TensorValue {
         shape: l.shape.clone(),
+        strides: TensorValue::contiguous_strides(&l.shape),
+        offset: 0,
         dtype: l.dtype,
-        data: l.data.iter().zip(&r.data).map(|(x, y)| f(*x, *y)).collect(),
+        data: out,
     })
 }
 
 fn expand(v: &TensorValue, out_shape: &[usize]) -> Result<TensorValue> {
-    let out_numel: usize = out_shape.iter().product();
-    if out_numel == v.numel() {
-        let mut out = v.clone();
-        out.shape = out_shape.to_vec();
-        return Ok(out);
-    }
     let in_rank = v.shape.len();
     let out_rank = out_shape.len();
     if in_rank != out_rank {
         bail!("expand rank mismatch");
     }
+    let mut out_strides = v.strides.clone();
     for i in 0..in_rank {
         if v.shape[i] != 1 && v.shape[i] != out_shape[i] {
             bail!(
@@ -418,25 +495,16 @@ fn expand(v: &TensorValue, out_shape: &[usize]) -> Result<TensorValue> {
                 out_shape[i]
             );
         }
-    }
-    let in_strides = compute_strides(&v.shape);
-    let mut out = vec![0.0; out_numel];
-    for (idx, slot) in out.iter_mut().enumerate() {
-        let coord = unravel_index(idx, out_shape);
-        let mut in_coord = vec![0usize; in_rank];
-        for i in 0..in_rank {
-            in_coord[i] = if v.shape[i] == 1 { 0 } else { coord[i] };
+        if v.shape[i] == 1 && out_shape[i] > 1 {
+            out_strides[i] = 0;
         }
-        let in_flat = ravel_index(&in_coord, &in_strides);
-        *slot = *v
-            .data
-            .get(in_flat)
-            .ok_or_else(|| anyhow::anyhow!("expand produced out-of-bounds index {}", in_flat))?;
     }
     Ok(TensorValue {
         shape: out_shape.to_vec(),
+        strides: out_strides,
+        offset: v.offset,
         dtype: v.dtype,
-        data: out,
+        data: v.data.clone(),
     })
 }
 
@@ -445,22 +513,13 @@ fn permute(v: &TensorValue, axes: &[usize]) -> Result<TensorValue> {
         bail!("permute rank mismatch");
     }
     let out_shape: Vec<usize> = axes.iter().map(|&i| v.shape[i]).collect();
-    let out_numel: usize = out_shape.iter().product();
-    let in_strides = compute_strides(&v.shape);
-    let mut out = vec![0.0; out_numel];
-    for (idx, slot) in out.iter_mut().enumerate() {
-        let out_coord = unravel_index(idx, &out_shape);
-        let mut in_coord = vec![0usize; axes.len()];
-        for (out_axis, &in_axis) in axes.iter().enumerate() {
-            in_coord[in_axis] = out_coord[out_axis];
-        }
-        let in_flat = ravel_index(&in_coord, &in_strides);
-        *slot = v.data[in_flat];
-    }
+    let out_strides: Vec<usize> = axes.iter().map(|&i| v.strides[i]).collect();
     Ok(TensorValue {
         shape: out_shape,
+        strides: out_strides,
+        offset: v.offset,
         dtype: v.dtype,
-        data: out,
+        data: v.data.clone(),
     })
 }
 
@@ -487,21 +546,16 @@ fn slice(v: &TensorValue, ranges: &[crate::core::hlir::Range]) -> Result<TensorV
         starts.push(s);
         out_shape.push(e - s);
     }
-    let in_strides = compute_strides(&v.shape);
-    let out_numel: usize = out_shape.iter().product();
-    let mut out = vec![0.0; out_numel];
-    for (idx, slot) in out.iter_mut().enumerate() {
-        let mut coord = unravel_index(idx, &out_shape);
-        for i in 0..coord.len() {
-            coord[i] += starts[i];
-        }
-        let in_flat = ravel_index(&coord, &in_strides);
-        *slot = v.data[in_flat];
+    let mut offset = v.offset;
+    for (start, stride) in starts.iter().zip(&v.strides) {
+        offset += start * stride;
     }
     Ok(TensorValue {
         shape: out_shape,
+        strides: v.strides.clone(),
+        offset,
         dtype: v.dtype,
-        data: out,
+        data: v.data.clone(),
     })
 }
 
@@ -518,19 +572,20 @@ fn concat(parts: &[TensorValue], axis: usize) -> Result<TensorValue> {
 
     let mut axis_offset = 0usize;
     for p in parts {
-        let p_strides = compute_strides(&p.shape);
         for idx in 0..p.numel() {
             let mut coord = unravel_index(idx, &p.shape);
             coord[axis] += axis_offset;
             let out_idx = ravel_index(&coord, &out_strides);
-            let p_idx = ravel_index(&unravel_index(idx, &p.shape), &p_strides);
-            out[out_idx] = p.data[p_idx];
+            out[out_idx] = p.get_flat(idx);
         }
         axis_offset += p.shape[axis];
     }
 
+    let out_strides = compute_strides(&out_shape);
     Ok(TensorValue {
         shape: out_shape,
+        strides: out_strides,
+        offset: 0,
         dtype,
         data: out,
     })
@@ -565,7 +620,8 @@ fn reduce(
     let mut out = vec![init; out_numel];
     let out_strides = compute_strides(&out_shape);
 
-    for (idx, val) in v.data.iter().copied().enumerate() {
+    for idx in 0..v.numel() {
+        let val = v.get_flat(idx);
         let coord = unravel_index(idx, &v.shape);
         let mut out_coord = Vec::new();
         for (i, c) in coord.iter().copied().enumerate() {
@@ -589,8 +645,11 @@ fn reduce(
         };
     }
 
+    let out_strides = compute_strides(&out_shape);
     Ok(TensorValue {
         shape: out_shape,
+        strides: out_strides,
+        offset: 0,
         dtype: v.dtype,
         data: out,
     })
