@@ -83,6 +83,42 @@ impl Scalar {
         }
     }
 
+    pub fn is_exact_zero(&self) -> bool {
+        match self {
+            Scalar::F32(v) => *v == 0.0,
+            Scalar::F64(v) => *v == 0.0,
+            Scalar::I8(v) => *v == 0,
+            Scalar::I16(v) => *v == 0,
+            Scalar::I32(v) => *v == 0,
+            Scalar::I64(v) => *v == 0,
+            Scalar::U8(v) => *v == 0,
+            Scalar::U16(v) => *v == 0,
+            Scalar::U32(v) => *v == 0,
+            Scalar::U64(v) => *v == 0,
+            Scalar::Bool(v) => !v,
+            Scalar::F16(v) => *v == 0,
+            Scalar::BF16(v) => *v == 0,
+        }
+    }
+
+    pub fn is_exact_one(&self) -> bool {
+        match self {
+            Scalar::F32(v) => *v == 1.0,
+            Scalar::F64(v) => *v == 1.0,
+            Scalar::I8(v) => *v == 1,
+            Scalar::I16(v) => *v == 1,
+            Scalar::I32(v) => *v == 1,
+            Scalar::I64(v) => *v == 1,
+            Scalar::U8(v) => *v == 1,
+            Scalar::U16(v) => *v == 1,
+            Scalar::U32(v) => *v == 1,
+            Scalar::U64(v) => *v == 1,
+            Scalar::Bool(v) => *v,
+            Scalar::F16(v) => *v == 0x3C00,  // IEEE 754 half-precision 1.0
+            Scalar::BF16(v) => *v == 0x3F80,  // bfloat16 1.0
+        }
+    }
+
     pub fn from_f64(val: f64, dtype: DType) -> Scalar {
         match dtype {
             DType::F32 => Scalar::F32(val as f32),

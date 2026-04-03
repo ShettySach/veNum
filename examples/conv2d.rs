@@ -22,7 +22,7 @@ fn main() -> anyhow::Result<()> {
     println!("\nMermaid graph:\n{}", cx.graph_mermaid());
     println!(
         "\nOptimized Mermaid graph:\n{}",
-        cx.optimized_graph_mermaid()
+        cx.optimized_graph_mermaid(&[output.id()])
     );
 
     Ok(())

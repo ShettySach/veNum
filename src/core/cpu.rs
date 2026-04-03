@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::{bail, Result};
 
+use crate::core::compile::OutputRemapper;
 use crate::core::hlir::{op::CmpOp, BufferId, DType, Dim, NodeId, Op, Scalar};
 use crate::core::llir::LLIRProgram;
 use crate::core::traits::CodeGenerator;
@@ -21,8 +22,15 @@ pub struct CpuModule {
     pub outputs: Vec<NodeId>,
 }
 
+#[derive(Clone, Debug)]
 pub struct CpuCodeGenerator {
     pub outputs: Vec<NodeId>,
+}
+
+impl CpuCodeGenerator {
+    pub fn new(outputs: Vec<NodeId>) -> Self {
+        Self { outputs }
+    }
 }
 
 impl CodeGenerator for CpuCodeGenerator {
@@ -33,6 +41,12 @@ impl CodeGenerator for CpuCodeGenerator {
             program: program.clone(),
             outputs: self.outputs.clone(),
         })
+    }
+}
+
+impl OutputRemapper for CpuCodeGenerator {
+    fn with_remapped_outputs(&self, outputs: Vec<NodeId>) -> Self {
+        Self { outputs }
     }
 }
 

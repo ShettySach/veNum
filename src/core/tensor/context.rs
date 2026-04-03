@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::core::hlir::{BufferId, HLIRGraph, NodeId, Op};
+use crate::core::hlir::{canonicalize_with_roots, BufferId, HLIRGraph, NodeId, Op};
 
 /// Execution context for tensors.
 ///
@@ -95,14 +95,14 @@ impl Context {
         crate::print::to_mermaid(&graph)
     }
 
-    pub fn optimized_graph_mermaid(&self) -> String {
+    pub fn optimized_graph_mermaid(&self, roots: &[NodeId]) -> String {
         let graph = self
             .graph
             .lock()
             .expect("Graph mutex should not be poisoned")
             .clone();
 
-        let optimized = crate::core::compile::optimize_hlir(graph.clone()).unwrap_or(graph);
+        let optimized = canonicalize_with_roots(&graph, roots);
         crate::print::to_mermaid(&optimized)
     }
 }

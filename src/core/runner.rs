@@ -23,14 +23,14 @@ pub fn run_context(cx: &Context, outputs: &[NodeId], inputs: &[Buffer]) -> Resul
         .expect("Graph mutex should not be poisoned")
         .clone();
 
+    let cg = CpuCodeGenerator::new(outputs.to_vec());
     let module = compile(
         graph,
         &TrivialHardware,
         &NoOpDependenceAnalyzer,
-        &CpuCodeGenerator {
-            outputs: outputs.to_vec(),
-        },
+        &cg,
         &SearchConfig::default(),
+        outputs,
     )?;
 
     let bound: Vec<(BufferId, Buffer)> =

@@ -16,12 +16,14 @@ mod tests {
         let b = g.load(BufferId(1), ty);
         let c = g.binary(a, b, Op::Add);
 
+        let cg = CpuCodeGenerator::new(vec![c]);
         let module = compile(
             g,
             &TrivialHardware,
             &NoOpDependenceAnalyzer,
-            &CpuCodeGenerator { outputs: vec![c] },
+            &cg,
             &SearchConfig::default(),
+            &[c],
         )?;
 
         let out = module.execute(&[
@@ -46,12 +48,14 @@ mod tests {
         let m = g.binary(a, b, Op::Mul);
         let r = g.reduce(m, vec![1], crate::core::hlir::ReduceOp::Sum, false);
 
+        let cg = CpuCodeGenerator::new(vec![r]);
         let module = compile(
             g,
             &TrivialHardware,
             &NoOpDependenceAnalyzer,
-            &CpuCodeGenerator { outputs: vec![r] },
+            &cg,
             &SearchConfig::default(),
+            &[r],
         )?;
 
         let out = module.execute(&[
@@ -79,12 +83,14 @@ mod tests {
         );
         let c = crate::core::hlir::decompose::matmul(&mut g, a, b);
 
+        let cg = CpuCodeGenerator::new(vec![c]);
         let module = compile(
             g,
             &TrivialHardware,
             &NoOpDependenceAnalyzer,
-            &CpuCodeGenerator { outputs: vec![c] },
+            &cg,
             &SearchConfig::default(),
+            &[c],
         )?;
 
         let out = module.execute(&[
@@ -111,14 +117,14 @@ mod tests {
         let cond = g.cmp(crate::core::hlir::op::CmpOp::Gt, a, b);
         let out_node = g.where_select(cond, a, b);
 
+        let cg = CpuCodeGenerator::new(vec![out_node]);
         let module = compile(
             g,
             &TrivialHardware,
             &NoOpDependenceAnalyzer,
-            &CpuCodeGenerator {
-                outputs: vec![out_node],
-            },
+            &cg,
             &SearchConfig::default(),
+            &[out_node],
         )?;
 
         let out = module.execute(&[
@@ -157,6 +163,39 @@ mod tests {
                     &vec![-6.0, -6.0, -6.0, -6.0, -6.0, -6.0, -6.0, -6.0, -6.0]
                 );
             }
+            _ => panic!("unexpected output dtype"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn canonicalization_can_be_disabled() -> Result<()> {
+        let mut g = HLIRGraph::new();
+        let ty = TensorType::contiguous(vec![Dim::Const(4)], DType::F32);
+        let a = g.load(BufferId(0), ty.clone());
+
+        // Create a redundant reshape chain that would be optimized away
+        let r1 = g.reshape(a, vec![Dim::Const(2), Dim::Const(2)]);
+        let r2 = g.reshape(r1, vec![Dim::Const(4)]);
+
+        let mut config = SearchConfig::default();
+        config.enable_canonicalization = false;
+
+        let cg = CpuCodeGenerator::new(vec![r2]);
+        let module = compile(
+            g,
+            &TrivialHardware,
+            &NoOpDependenceAnalyzer,
+            &cg,
+            &config,
+            &[r2],
+        )?;
+
+        let out = module.execute(&[(BufferId(0), Buffer::F32(vec![1.0, 2.0, 3.0, 4.0]))])?;
+
+        match &out[0] {
+            Buffer::F32(v) => assert_eq!(v, &vec![1.0, 2.0, 3.0, 4.0]),
             _ => panic!("unexpected output dtype"),
         }
 
