@@ -1,7 +1,146 @@
 //! Convolution operations for tensors.
 
 use crate::core::tensor::structure::Tensor;
-use anyhow::{Result, anyhow, bail};
+use anyhow::{anyhow, bail, Result};
+
+impl Tensor {
+    /// 2D convolution using the shifted-slice decomposition from the spec.
+    ///
+    /// Expresses convolution as a sum of shifted pointwise correlations:
+    /// - For each kernel position (ky, kx), slice input and weight
+    /// - Reshape, expand, multiply, reduce over channels, accumulate
+    ///
+    /// This approach keeps convolution in ordinary graph space and exposes
+    /// optimization choices later rather than forcing window-materialization.
+    pub fn conv2d(&self, weight: &Tensor) -> Result<Tensor> {
+        if self.dtype != weight.dtype {
+            bail!(
+                "conv2d requires matching dtypes: {:?} vs {:?}",
+                self.dtype,
+                weight.dtype
+            );
+        }
+
+        if self.shape.len() != 4 {
+            bail!(
+                "conv2d: input must be 4D [batch_size, channels_in, input_height, input_width], got {:?}",
+                self.shape
+            );
+        }
+        if weight.shape.len() != 4 {
+            bail!(
+                "conv2d: weight must be 4D [channels_out, channels_in, kernel_height, kernel_width], got {:?}",
+                weight.shape
+            );
+        }
+
+        let batch_size = self.shape[0]
+            .as_const()
+            .ok_or_else(|| anyhow!("conv2d requires constant batch dimension"))?;
+        let channels_in = self.shape[1]
+            .as_const()
+            .ok_or_else(|| anyhow!("conv2d requires constant channels_in"))?;
+        let inp_height = self.shape[2]
+            .as_const()
+            .ok_or_else(|| anyhow!("conv2d requires constant input height"))?;
+        let inp_width = self.shape[3]
+            .as_const()
+            .ok_or_else(|| anyhow!("conv2d requires constant input width"))?;
+
+        let channels_out = weight.shape[0]
+            .as_const()
+            .ok_or_else(|| anyhow!("conv2d requires constant channels_out"))?;
+        let kernel_channels_in = weight.shape[1]
+            .as_const()
+            .ok_or_else(|| anyhow!("conv2d requires constant kernel channels_in"))?;
+        let kernel_height = weight.shape[2]
+            .as_const()
+            .ok_or_else(|| anyhow!("conv2d requires constant kernel height"))?;
+        let kernel_width = weight.shape[3]
+            .as_const()
+            .ok_or_else(|| anyhow!("conv2d requires constant kernel width"))?;
+
+        if channels_in != kernel_channels_in {
+            bail!(
+                "conv2d: input channels {} != weight channels {}",
+                channels_in,
+                kernel_channels_in
+            );
+        }
+
+        if kernel_height > inp_height || kernel_width > inp_width {
+            bail!(
+                "conv2d: kernel [{}, {}] larger than input [{}, {}]",
+                kernel_height,
+                kernel_width,
+                inp_height,
+                inp_width
+            );
+        }
+
+        let output_height = inp_height - kernel_height + 1;
+        let output_width = inp_width - kernel_width + 1;
+
+        let mut acc: Option<Tensor> = None;
+
+        for ky in 0..kernel_height {
+            for kx in 0..kernel_width {
+                let patch = self.slice(vec![
+                    (0, batch_size),
+                    (0, channels_in),
+                    (ky, ky + output_height),
+                    (kx, kx + output_width),
+                ])?;
+
+                let filt = weight.slice(vec![
+                    (0, channels_out),
+                    (0, channels_in),
+                    (ky, ky + 1),
+                    (kx, kx + 1),
+                ])?;
+
+                let patch5 = patch.reshape(vec![
+                    batch_size,
+                    1,
+                    channels_in,
+                    output_height,
+                    output_width,
+                ])?;
+
+                let filt5 = filt.reshape(vec![1, channels_out, channels_in, 1, 1])?;
+
+                let patch_expanded = patch5.expand(vec![
+                    batch_size,
+                    channels_out,
+                    channels_in,
+                    output_height,
+                    output_width,
+                ])?;
+
+                let filt_expanded = filt5.expand(vec![
+                    batch_size,
+                    channels_out,
+                    channels_in,
+                    output_height,
+                    output_width,
+                ])?;
+
+                let prod = patch_expanded.mul(&filt_expanded)?;
+
+                let term = prod.sum(&[2], false)?;
+
+                match &mut acc {
+                    None => acc = Some(term),
+                    Some(acc_tensor) => {
+                        *acc_tensor = acc_tensor.add(&term)?;
+                    }
+                }
+            }
+        }
+
+        acc.ok_or_else(|| anyhow!("conv2d: no kernel iterations performed"))
+    }
+}
 
 impl Tensor {
     /// 2D convolution (cross-correlation) as used in CNNs.
@@ -13,7 +152,7 @@ impl Tensor {
     /// Uses the tinygrad-style `_pool` trick: instead of iterating over each kernel
     /// position, we use shape manipulation (expand with zero strides, permute, slice)
     /// to create all sliding windows in a single graph fragment.
-    pub fn conv2d(&self, weight: &Tensor) -> Result<Tensor> {
+    pub fn conv2d_tg(&self, weight: &Tensor) -> Result<Tensor> {
         if self.dtype != weight.dtype {
             bail!(
                 "conv2d requires matching dtypes: {:?} vs {:?}",
@@ -85,7 +224,7 @@ impl Tensor {
         // Use _pool to create sliding windows
         // Input: [batch, channels_in, height, width]
         // Pooled: [batch, channels_in, out_height, out_width, kernel_height, kernel_width]
-        let pooled = self._pool2d(kernel_height, kernel_width, 1, 1)?;
+        let pooled = self.pool2d(kernel_height, kernel_width, 1, 1)?;
 
         // Reshape weight for broadcasting:
         // [channels_out, channels_in, kernel_height, kernel_width]
@@ -149,7 +288,7 @@ impl Tensor {
     ///
     /// This uses the tinygrad trick: reshape to add kernel dimensions, then use
     /// expand with zero strides to create overlapping windows without data copying.
-    fn _pool2d(
+    fn pool2d(
         &self,
         kernel_height: i64,
         kernel_width: i64,
