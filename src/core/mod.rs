@@ -4,6 +4,7 @@ pub mod dep;
 pub mod hlir;
 pub mod llir;
 pub mod lower;
+pub mod poly;
 pub mod runner;
 pub mod schedule;
 pub mod tensor;

@@ -21,6 +21,10 @@ pub use core::llir::{
     AffineConstraint, AffineExpr, ConstraintKind, DepKind, Dependence, DependenceRelation,
     LLIRProgram, Loop, LoopKind, LoopNest, MemoryAccess, Stmt, Var,
 };
+pub use core::poly::{
+    shape_to_domain, strides_to_access, AccessMap, Aff, Constraint, Domain,
+    NativeDependenceAnalyzer, PolyVar,
+};
 pub use core::runner::run_context;
 pub use core::schedule::{
     BackendClass, CostEstimate, FusionGroup, FusionGroupId, FusionTopology, HardwareModel,
