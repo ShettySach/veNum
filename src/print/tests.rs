@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod print_tests {
     use crate::core::compile::SearchConfig;
     use crate::core::hlir::{DType, TensorType};
     use crate::core::tensor::{Context, Tensor};
