@@ -11,7 +11,7 @@ impl DependenceAnalyzer for NoOpDependenceAnalyzer {
         Ok(Vec::new())
     }
 
-    fn check_legality(&self, _deps: &[Dependence], _transform: &ScheduleTransform) -> Result<bool> {
+    fn check_legality(&self, _deps: &[Dependence], _transform: &ScheduleTransform, _kernel: &Kernel) -> Result<bool> {
         Ok(true)
     }
 

@@ -58,6 +58,7 @@ fn expand_decision<H: HardwareModel>(
         let ctx = KernelContext {
             loop_bounds: vec![64; fg.nodes.len().max(1)],
             reduce_axes: vec![],
+            carried_dep_axes: vec![],
             dtype: DType::F32,
             shared_budget: 48 * 1024,
             backend: crate::core::schedule::BackendClass::Cpu,
@@ -95,6 +96,7 @@ fn estimate_decision_cost<H: HardwareModel>(
         let ctx = KernelContext {
             loop_bounds: vec![64; loop_rank],
             reduce_axes,
+            carried_dep_axes: vec![],
             dtype: DType::F32,
             shared_budget: 48 * 1024,
             backend: crate::core::schedule::BackendClass::Cpu,

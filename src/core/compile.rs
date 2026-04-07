@@ -1,6 +1,8 @@
 use anyhow::Result;
 
 use crate::core::hlir::{HLIRGraph, NodeId, canonicalize_with_roots_and_map};
+use crate::core::llir::loop_nest::LoopKind;
+use crate::core::llir::program::Kernel;
 use crate::core::llir::LLIRProgram;
 use crate::core::lower::lower;
 use crate::core::schedule::{HardwareModel, ScheduleSearcher};
@@ -33,9 +35,76 @@ pub fn optimize_hlir_with_outputs(
     Ok((opt, remap))
 }
 
-/// Apply LLIR-level optimizations (currently a no-op placeholder)
-pub fn optimize_llir(program: LLIRProgram, _dep: &impl DependenceAnalyzer) -> Result<LLIRProgram> {
-    Ok(program)
+/// Apply LLIR-level polyhedral optimizations.
+///
+/// Currently implements:
+/// - Loop interchange when proven legal by dependence analysis and the
+///   inner loop has a larger trip count (better spatial locality).
+///
+/// Transformations are conservative: each is checked for legality before
+/// being applied, and at most one interchange is attempted per kernel.
+pub fn optimize_llir(program: LLIRProgram, dep: &impl DependenceAnalyzer) -> Result<LLIRProgram> {
+    let mut kernels = program.kernels;
+
+    for kernel in &mut kernels {
+        try_interchange(kernel, dep)?;
+    }
+
+    Ok(LLIRProgram { kernels })
+}
+
+/// Try to find and apply a beneficial loop interchange on a kernel.
+///
+/// Scans adjacent sequential loop pairs and interchanges the first pair
+/// where:
+/// 1. Both loops are sequential (not parallel, vectorized, or reduce).
+/// 2. The inner loop has a strictly larger constant trip count (bringing
+///    the larger dimension inward improves spatial locality).
+/// 3. Dependence analysis confirms the interchange is legal.
+fn try_interchange(kernel: &mut Kernel, dep: &impl DependenceAnalyzer) -> Result<()> {
+    let loops = &kernel.loop_nest.loops;
+    if loops.len() < 2 {
+        return Ok(());
+    }
+
+    // Find the first beneficial interchange candidate.
+    let candidate = (0..loops.len() - 1).find(|&i| {
+        let outer = &loops[i];
+        let inner = &loops[i + 1];
+
+        // Both must be sequential.
+        if !matches!(outer.kind, LoopKind::Sequential)
+            || !matches!(inner.kind, LoopKind::Sequential)
+        {
+            return false;
+        }
+
+        // Inner must have a strictly larger trip count for locality benefit.
+        match (outer.upper.as_const_value(), inner.upper.as_const_value()) {
+            (Some(ou), Some(iu)) => iu > ou,
+            _ => false,
+        }
+    });
+
+    let candidate_idx = match candidate {
+        Some(i) => i,
+        None => return Ok(()),
+    };
+
+    // Check legality via dependence analysis.
+    let deps = dep.analyze_kernel(kernel)?;
+    let outer_var = &kernel.loop_nest.loops[candidate_idx].var;
+    let inner_var = &kernel.loop_nest.loops[candidate_idx + 1].var;
+
+    use crate::core::poly::analysis::legality::can_interchange;
+    if !can_interchange(&deps, outer_var, inner_var) {
+        return Ok(());
+    }
+
+    // Apply the interchange.
+    kernel.loop_nest.loops.swap(candidate_idx, candidate_idx + 1);
+
+    Ok(())
 }
 
 /// Compile HLIR graph to executable module

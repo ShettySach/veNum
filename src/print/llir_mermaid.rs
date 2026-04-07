@@ -34,8 +34,8 @@ pub fn to_llir_mermaid(program: &LLIRProgram) -> String {
                         "{}:{}[{}..{}]",
                         lp.var,
                         loop_kind_label(&lp.kind),
-                        lp.lower.constant,
-                        lp.upper.constant
+                        lp.lower,
+                        lp.upper
                     )
                 })
                 .collect::<Vec<_>>()

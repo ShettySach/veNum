@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod schedule_tests {
     use crate::core::cost::CpuHardwareModel;
     use crate::core::hlir::{BufferId, DType, Dim, HLIRGraph, Op, TensorType};
     use crate::core::schedule::decision::{FusionGroup, FusionGroupId, FusionTopology};
@@ -31,6 +31,7 @@ mod tests {
         let opts = hw.opt_candidates(&KernelContext {
             loop_bounds: vec![64, 64],
             reduce_axes: vec![1],
+            carried_dep_axes: vec![],
             dtype: DType::F32,
             shared_budget: 0,
             backend: crate::core::schedule::BackendClass::Cpu,

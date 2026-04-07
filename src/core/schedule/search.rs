@@ -15,6 +15,9 @@ pub enum BackendClass {
 pub struct KernelContext {
     pub loop_bounds: Vec<i64>,
     pub reduce_axes: Vec<usize>,
+    /// Loop axes that carry a dependence (parallelization/vectorization
+    /// on these axes is illegal).  Populated from polyhedral analysis.
+    pub carried_dep_axes: Vec<usize>,
     pub dtype: DType,
     pub shared_budget: usize,
     pub backend: BackendClass,
@@ -80,6 +83,7 @@ impl<H: HardwareModel> ScheduleSearcher<H> {
         let seed_cost = self.hardware.estimate_cost(&KernelContext {
             loop_bounds: Vec::new(),
             reduce_axes: Vec::new(),
+            carried_dep_axes: Vec::new(),
             dtype: DType::F32,
             shared_budget: 0,
             backend: BackendClass::Cpu,

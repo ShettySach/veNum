@@ -5,6 +5,7 @@ pub fn opt_candidates(ctx: &KernelContext) -> Vec<Opt> {
 
     for (axis, &bound) in ctx.loop_bounds.iter().enumerate() {
         let is_reduce = ctx.reduce_axes.contains(&axis);
+        let is_carried = ctx.carried_dep_axes.contains(&axis);
 
         for amt in tile_amounts(bound) {
             out.push(Opt {
@@ -19,7 +20,9 @@ pub fn opt_candidates(ctx: &KernelContext) -> Vec<Opt> {
                 amt,
             });
 
-            if !is_reduce {
+            // Parallelize is illegal on reduce axes and on axes with
+            // carried dependences.
+            if !is_reduce && !is_carried {
                 out.push(Opt {
                     op: OptOp::Parallelize,
                     axis,
@@ -28,7 +31,9 @@ pub fn opt_candidates(ctx: &KernelContext) -> Vec<Opt> {
             }
         }
 
-        if !is_reduce {
+        // Vectorize is illegal on reduce axes and on axes with carried
+        // dependences.
+        if !is_reduce && !is_carried {
             for width in vector_widths(ctx) {
                 out.push(Opt {
                     op: OptOp::Vectorize,
@@ -46,6 +51,7 @@ pub fn opt_candidates(ctx: &KernelContext) -> Vec<Opt> {
             });
         }
 
+        // GroupReduce only on reduce axes on GPU/WGSL backends.
         if is_reduce && matches!(ctx.backend, BackendClass::Gpu | BackendClass::Wgsl) {
             for threads in group_reduce_amounts(bound, ctx.shared_budget) {
                 out.push(Opt {

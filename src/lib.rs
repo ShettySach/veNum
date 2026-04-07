@@ -23,9 +23,11 @@ pub use core::llir::{
     LLIRProgram, Loop, LoopKind, LoopNest, MemoryAccess, Stmt, Var,
 };
 pub use core::poly::{
-    AccessMap, Aff, Constraint, Domain, NativeDependenceAnalyzer, PolyVar, shape_to_domain,
-    strides_to_access,
+    AccessMap, Aff, Constraint, ConstraintSystem, Domain, NativeDependenceAnalyzer, PolyVar,
+    Relation, extract_instances, project_out, shape_to_domain, strides_to_access,
 };
+pub use core::poly::analysis::legality;
+pub use core::poly::native::feasibility::{Feasibility, check_feasibility};
 pub use core::runner::run_context;
 pub use core::schedule::{
     BackendClass, CostEstimate, FusionGroup, FusionGroupId, FusionTopology, HardwareModel,

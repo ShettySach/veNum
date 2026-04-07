@@ -6,7 +6,12 @@ use crate::core::llir::{Dependence, DependenceRelation, Kernel, LLIRProgram, Loo
 pub trait DependenceAnalyzer {
     fn analyze_kernel(&self, kernel: &Kernel) -> Result<Vec<Dependence>>;
 
-    fn check_legality(&self, deps: &[Dependence], transform: &ScheduleTransform) -> Result<bool>;
+    fn check_legality(
+        &self,
+        deps: &[Dependence],
+        transform: &ScheduleTransform,
+        kernel: &Kernel,
+    ) -> Result<bool>;
 
     fn access_dependence(
         &self,
@@ -35,6 +40,12 @@ pub enum ScheduleTransform {
     Vectorize {
         loop_var: String,
         width: usize,
+    },
+    GroupReduce {
+        loop_var: String,
+    },
+    PadTo {
+        loop_var: String,
     },
     ComputeAt {
         producer: usize,

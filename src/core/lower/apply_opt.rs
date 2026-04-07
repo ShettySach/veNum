@@ -41,7 +41,10 @@ fn apply_tile(nest: &mut LoopNest, opt: &Opt) -> Result<()> {
     let amt = positive_amt(opt)?;
     let axis = opt.axis;
     let original = nest.loops[axis].clone();
-    let original_upper = original.upper.constant;
+    let original_upper = original
+        .upper
+        .as_const_value()
+        .ok_or_else(|| anyhow!("tile requires constant loop bound"))?;
 
     nest.loops[axis].var = format!("{}_outer", original.var);
     nest.loops[axis].upper = AffineExpr::constant(div_ceil_i64(original_upper, amt));
@@ -91,7 +94,10 @@ fn apply_pad_to(nest: &mut LoopNest, opt: &Opt) -> Result<()> {
     validate_axis(&nest.loops, opt.axis)?;
     let amt = positive_amt(opt)?;
     let lp = &mut nest.loops[opt.axis];
-    let old_upper = lp.upper.constant;
+    let old_upper = lp
+        .upper
+        .as_const_value()
+        .ok_or_else(|| anyhow!("pad_to requires constant loop bound"))?;
     let padded_upper = div_ceil_i64(old_upper, amt) * amt;
     lp.upper = AffineExpr::constant(padded_upper);
 
@@ -145,7 +151,10 @@ fn apply_group_reduce(nest: &mut LoopNest, opt: &Opt) -> Result<BufferAlloc> {
         Loop {
             var: "k".to_owned(),
             lower: AffineExpr::constant(0),
-            upper: AffineExpr::constant(div_ceil_i64(reduce_loop.upper.constant, amt)),
+            upper: AffineExpr::constant(div_ceil_i64(
+            reduce_loop.upper.as_const_value().unwrap_or(1),
+            amt,
+        )),
             step: 1,
             kind: LoopKind::Sequential,
             annotations: reduce_loop.annotations,

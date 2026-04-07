@@ -1,4 +1,4 @@
-use venum::{run_context, Buffer, Context, DType, SearchConfig, Tensor};
+use venum::{Buffer, Context, DType, SearchConfig, Tensor, run_context};
 
 fn main() -> anyhow::Result<()> {
     let cx = Context::new();

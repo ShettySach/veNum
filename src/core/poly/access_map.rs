@@ -1,12 +1,13 @@
 use anyhow::{Result, bail};
 
-use crate::core::hlir::Dim;
+use crate::core::hlir::{BufferId, Dim};
 use crate::core::llir::MemoryAccess;
 
 use super::domain::{Aff, PolyVar};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccessMap {
+    pub buffer: BufferId,
     pub domain_iters: Vec<String>,
     pub mapping: Vec<Aff>,
 }
@@ -33,6 +34,7 @@ pub fn strides_to_access(strides: &[Dim], domain_iters: &[String]) -> Result<Acc
     }
 
     Ok(AccessMap {
+        buffer: BufferId(0),
         domain_iters: domain_iters.to_vec(),
         mapping: vec![aff],
     })
@@ -56,6 +58,7 @@ pub fn memory_access_to_access_map(access: &MemoryAccess, loop_vars: &[String]) 
         .collect();
 
     AccessMap {
+        buffer: access.buffer,
         domain_iters: loop_vars.to_vec(),
         mapping,
     }

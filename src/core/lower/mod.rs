@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::core::hlir::{Dim, HLIRGraph, Op};
-use crate::core::llir::affine::AffineExpr;
+use crate::core::llir::affine::{AffineExpr, Var};
 use crate::core::llir::loop_nest::{
     Loop, LoopAnnotations, LoopKind, LoopNest, ReductionAccumulator,
 };
@@ -36,17 +36,19 @@ pub fn lower(
         let group_opts = decision.opts.get(&fg.id).cloned().unwrap_or_default();
         for opt in &group_opts {
             for kernel in &mut per_group_kernels {
-                let apply = apply_opt::apply_opt(kernel.loop_nest.clone(), opt)?;
-                kernel.loop_nest = apply.nest;
-                kernel.allocs.extend(apply.allocs);
-
+                // Check legality BEFORE applying the opt so we never
+                // corrupt the kernel state with an illegal transform.
                 if !legality::check_opt_legality(dep, kernel, opt)? {
                     return Err(anyhow::anyhow!(
-                        "legality violation while applying {:?} on {}",
+                        "legality violation: {:?} is illegal on {}",
                         opt,
                         kernel.name
                     ));
                 }
+
+                let apply = apply_opt::apply_opt(kernel.loop_nest.clone(), opt)?;
+                kernel.loop_nest = apply.nest;
+                kernel.allocs.extend(apply.allocs);
             }
         }
 
@@ -66,14 +68,10 @@ fn build_base_kernel(
     let root_node = hlir.node(root);
     let mut loops = Vec::new();
     for (i, dim) in root_node.ty.shape.iter().enumerate() {
-        let ub = match dim {
-            Dim::Const(v) => *v,
-            _ => 1,
-        };
         loops.push(Loop {
             var: format!("i{i}"),
             lower: AffineExpr::constant(0),
-            upper: AffineExpr::constant(ub),
+            upper: dim_to_affine_expr(dim),
             step: 1,
             kind: LoopKind::Sequential,
             annotations: LoopAnnotations::default(),
@@ -83,15 +81,20 @@ fn build_base_kernel(
     if let Op::Reduce {
         axes,
         op,
-        input: _input,
+        input,
         ..
     } = &root_node.op
     {
-        for (j, _axis) in axes.iter().enumerate() {
+        let input_shape = &hlir.node(*input).ty.shape;
+        for (j, &axis) in axes.iter().enumerate() {
+            let reduce_dim = input_shape
+                .get(axis)
+                .cloned()
+                .unwrap_or(Dim::Const(1));
             loops.push(Loop {
                 var: format!("r{j}"),
                 lower: AffineExpr::constant(0),
-                upper: AffineExpr::constant(1),
+                upper: dim_to_affine_expr(&reduce_dim),
                 step: 1,
                 kind: LoopKind::Reduce {
                     accumulators: vec![ReductionAccumulator {
@@ -153,4 +156,30 @@ fn expr_from_node(id: crate::core::hlir::NodeId) -> Expr {
         indices: vec![AffineExpr::constant(0)],
         access_kind: AccessKind::Read,
     })
+}
+
+/// Convert an HLIR `Dim` to an LLIR `AffineExpr`.
+///
+/// Affine cases (`Const`, `Sym`, `Add`, `Mul` by const) produce proper
+/// symbolic expressions.  Non-affine cases (`Div`, `Mod`, `Sym*Sym`)
+/// fall back to constant `1` so lowering never panics.
+fn dim_to_affine_expr(dim: &Dim) -> AffineExpr {
+    match dim {
+        Dim::Const(v) => AffineExpr::constant(*v),
+        Dim::Sym(sym) => AffineExpr::constant(0).with_term(1, Var::Param(*sym)),
+        Dim::Add(a, b) => dim_to_affine_expr(a).add(&dim_to_affine_expr(b)),
+        Dim::Mul(a, b) => {
+            let ae = dim_to_affine_expr(a);
+            let be = dim_to_affine_expr(b);
+            if let Some(c) = ae.as_const_value() {
+                be.scale(c)
+            } else if let Some(c) = be.as_const_value() {
+                ae.scale(c)
+            } else {
+                // Non-affine: both sides symbolic. Conservative fallback.
+                AffineExpr::constant(1)
+            }
+        }
+        Dim::Div(..) | Dim::Mod(..) => AffineExpr::constant(1),
+    }
 }
