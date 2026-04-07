@@ -1,6 +1,6 @@
 //! Shape operations for tensors.
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{anyhow, bail, Result};
 
 use crate::core::hlir::{Dim, Range};
 
@@ -9,7 +9,7 @@ use crate::core::tensor::structure::Tensor;
 impl Tensor {
     /// Reshape the tensor to a new shape.
     pub fn reshape(&self, new_shape: Vec<i64>) -> Result<Tensor> {
-        let new_shape: Vec<Dim> = new_shape.into_iter().map(Dim::constant).collect();
+        let new_shape: Vec<Dim> = new_shape.into_iter().map(Dim::Const).collect();
         let id = self.with_graph_mut(|g| g.reshape(self.id, new_shape.clone()));
         Ok(self.derived(id, new_shape))
     }
@@ -43,7 +43,7 @@ impl Tensor {
 
     /// Expand dimensions by broadcasting.
     pub fn expand(&self, new_shape: Vec<i64>) -> Result<Tensor> {
-        let new_shape: Vec<Dim> = new_shape.into_iter().map(Dim::constant).collect();
+        let new_shape: Vec<Dim> = new_shape.into_iter().map(Dim::Const).collect();
         if new_shape.len() != self.shape.len() {
             bail!(
                 "expand: shape length {} must match tensor rank {}",
@@ -53,13 +53,17 @@ impl Tensor {
         }
 
         for (i, (old, new)) in self.shape.iter().zip(&new_shape).enumerate() {
-            let old = old
-                .as_const()
-                .ok_or_else(|| anyhow!("expand currently requires constant dims"))?;
-            let new = new
-                .as_const()
-                .ok_or_else(|| anyhow!("expand currently requires constant dims"))?;
-            if old != 1 && old != new {
+            let old = if let Dim::Const(v) = old {
+                v
+            } else {
+                return Err(anyhow!("expand currently requires constant dims"));
+            };
+            let new = if let Dim::Const(v) = new {
+                v
+            } else {
+                return Err(anyhow!("expand currently requires constant dims"));
+            };
+            if *old != 1 && *old != *new {
                 bail!(
                     "expand: dimension {} cannot be broadcast from {} to {}",
                     i,
@@ -86,9 +90,11 @@ impl Tensor {
         let mut new_shape = Vec::with_capacity(self.shape.len());
         let mut ir_ranges = Vec::with_capacity(self.shape.len());
         for (dim, &(start, end_raw)) in ranges.iter().enumerate() {
-            let size = self.shape[dim]
-                .as_const()
-                .ok_or_else(|| anyhow!("slice currently requires constant dims"))?;
+            let size = if let Dim::Const(v) = self.shape[dim] {
+                v
+            } else {
+                return Err(anyhow!("slice currently requires constant dims"));
+            };
             let end = if end_raw == 0 { size } else { end_raw };
             if start > end || end > size {
                 bail!(
@@ -98,10 +104,10 @@ impl Tensor {
                     size
                 );
             }
-            new_shape.push(Dim::constant(end - start));
+            new_shape.push(Dim::Const(end - start));
             ir_ranges.push(Range {
-                start: Dim::constant(start),
-                end: Dim::constant(end),
+                start: Dim::Const(start),
+                end: Dim::Const(end),
             });
         }
 
@@ -123,7 +129,7 @@ impl Tensor {
             return Ok(self.clone());
         }
 
-        let mut new_shape = vec![Dim::constant(1); new_rank - rank];
+        let mut new_shape = vec![Dim::Const(1); new_rank - rank];
         new_shape.extend_from_slice(&self.shape);
 
         let id = self.with_graph_mut(|g| g.reshape(self.id, new_shape.clone()));

@@ -139,8 +139,16 @@ fn relation_to_llir(rel: &Relation) -> DependenceRelation {
     }
 
     DependenceRelation {
-        source_vars: rel.source_iters.clone(),
-        sink_vars: rel.sink_iters.clone(),
+        source_vars: rel
+            .source_iters
+            .iter()
+            .map(|n| n.as_str().to_owned())
+            .collect(),
+        sink_vars: rel
+            .sink_iters
+            .iter()
+            .map(|n| n.as_str().to_owned())
+            .collect(),
         constraints,
     }
 }

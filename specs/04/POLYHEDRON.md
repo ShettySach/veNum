@@ -222,19 +222,19 @@ Status labels:
 - Partial: available but limited/approximate
 - Missing: not implemented yet
 
-| Capability | Status | Notes |
-|---|---|---|
-| C1 Canonical affine algebra | Implemented | `src/core/poly/domain.rs`, `src/core/llir/affine.rs` provide canonicalization, substitution, conversions |
-| C2 Affine-preserving lowering contract | Partial | Poly side rejects non-affine via `shape_to_domain_checked`, but lowerer still has non-affine `Dim` fallback to constant `1` in `src/core/lower/mod.rs` |
-| C3 Statement extraction | Partial | Statement instances and loop-domain extraction are implemented; affine binary guards and gather/scatter memory effects are now modeled in `src/core/poly/analysis/extract.rs`; boolean composition and full affine normalization of predicates are still limited |
-| C4 Relation system | Partial | Constraint system and dependence relation building are present in `src/core/poly/sets/relation.rs`; lexicographic order modeled via order slices |
-| C5 Projection engine | Partial | Exact-only elimination path added via `try_project_out_exact` in `src/core/poly/sets/project.rs`; unsupported cases remain unresolved as `None` |
-| C6 Feasibility/emptiness | Partial | Proof-oriented feasibility in `src/core/poly/native/feasibility.rs`; returns `Unknown` in many symbolic or hard systems |
-| C7 Dependence analysis pipeline | Partial | Kernel dependence uses extracted statements and feasibility in `src/core/poly/analysis/dependence.rs`; currently focuses on RAW/WAW paths and conservative distance extraction |
-| C8 Legality queries | Partial | Implemented in `src/core/poly/analysis/legality.rs`; conservative, but direction/distance precision is limited |
-| C9 Lowering integration | Implemented | Incremental legality checks after each opt in `src/core/lower/legality.rs` and `src/core/lower/mod.rs` |
-| C10 Search/cost integration | Partial | Candidate pruning can use `carried_dep_axes`, but search currently seeds empty carried-dependence info in `src/core/schedule/beam.rs` |
-| C11 LLIR polyhedral optimization | Partial | `optimize_llir` currently performs legality-checked interchange only (`src/core/compile.rs`) |
+| Capability                             | Status      | Notes                                                                                                                                                                                                                                                            |
+|---                                     |---          |---                                                                                                                                                                                                                                                               |
+| C1 Canonical affine algebra            | Implemented | `src/core/poly/domain.rs`, `src/core/llir/affine.rs` provide canonicalization, substitution, conversions                                                                                                                                                         |
+| C2 Affine-preserving lowering contract | Partial     | Poly side rejects non-affine via `shape_to_domain_checked`, but lowerer still has non-affine `Dim` fallback to constant `1` in `src/core/lower/mod.rs`                                                                                                           |
+| C3 Statement extraction                | Partial     | Statement instances and loop-domain extraction are implemented; affine binary guards and gather/scatter memory effects are now modeled in `src/core/poly/analysis/extract.rs`; boolean composition and full affine normalization of predicates are still limited |
+| C4 Relation system                     | Partial     | Constraint system and dependence relation building are present in `src/core/poly/sets/relation.rs`; lexicographic order modeled via order slices                                                                                                                 |
+| C5 Projection engine                   | Partial     | Exact-only elimination path added via `try_project_out_exact` in `src/core/poly/sets/project.rs`; unsupported cases remain unresolved as `None`                                                                                                                  |
+| C6 Feasibility/emptiness               | Partial     | Proof-oriented feasibility in `src/core/poly/native/feasibility.rs`; returns `Unknown` in many symbolic or hard systems                                                                                                                                          |
+| C7 Dependence analysis pipeline        | Partial     | Kernel dependence uses extracted statements and feasibility in `src/core/poly/analysis/dependence.rs`; currently focuses on RAW/WAW paths and conservative distance extraction                                                                                   |
+| C8 Legality queries                    | Partial     | Implemented in `src/core/poly/analysis/legality.rs`; conservative, but direction/distance precision is limited                                                                                                                                                   |
+| C9 Lowering integration                | Implemented | Incremental legality checks after each opt in `src/core/lower/legality.rs` and `src/core/lower/mod.rs`                                                                                                                                                           |
+| C10 Search/cost integration            | Partial     | Candidate pruning can use `carried_dep_axes`, but search currently seeds empty carried-dependence info in `src/core/schedule/beam.rs`                                                                                                                            |
+| C11 LLIR polyhedral optimization       | Partial     | `optimize_llir` currently performs legality-checked interchange only (`src/core/compile.rs`)                                                                                                                                                                     |
 
 ## 5. What Has Been Implemented Recently
 

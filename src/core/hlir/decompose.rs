@@ -46,27 +46,27 @@ pub fn matmul(graph: &mut HLIRGraph, lhs: NodeId, rhs: NodeId) -> NodeId {
     let mut batch = Vec::with_capacity(batch_rank);
     for i in 0..batch_rank {
         let l = if i < batch_rank - lhs_batch.len() {
-            Dim::constant(1)
+            Dim::Const(1)
         } else {
             lhs_batch[i - (batch_rank - lhs_batch.len())].clone()
         };
         let r = if i < batch_rank - rhs_batch.len() {
-            Dim::constant(1)
+            Dim::Const(1)
         } else {
             rhs_batch[i - (batch_rank - rhs_batch.len())].clone()
         };
         batch.push(broadcast_dim(l, r));
     }
 
-    let mut lhs_reshape = vec![Dim::constant(1); batch_rank - lhs_batch.len()];
+    let mut lhs_reshape = vec![Dim::Const(1); batch_rank - lhs_batch.len()];
     lhs_reshape.extend(lhs_batch);
     lhs_reshape.push(m.clone());
     lhs_reshape.push(k.clone());
-    lhs_reshape.push(Dim::constant(1));
+    lhs_reshape.push(Dim::Const(1));
 
-    let mut rhs_reshape = vec![Dim::constant(1); batch_rank - rhs_batch.len()];
+    let mut rhs_reshape = vec![Dim::Const(1); batch_rank - rhs_batch.len()];
     rhs_reshape.extend(rhs_batch);
-    rhs_reshape.push(Dim::constant(1));
+    rhs_reshape.push(Dim::Const(1));
     rhs_reshape.push(k.clone());
     rhs_reshape.push(n.clone());
 

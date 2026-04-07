@@ -15,7 +15,7 @@ impl Tensor {
     /// let input = Tensor::placeholder(&cx, DType::F32, vec![batch, seq_len, hidden]);
     /// ```
     pub fn placeholder(cx: &Context, dtype: DType, shape: Vec<i64>) -> Self {
-        let dim_shape: Vec<Dim> = shape.into_iter().map(Dim::constant).collect();
+        let dim_shape: Vec<Dim> = shape.into_iter().map(Dim::Const).collect();
         let graph = cx.graph();
         let id = graph.lock().unwrap().load(
             cx.alloc_buffer_id(),

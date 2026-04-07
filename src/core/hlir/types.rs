@@ -184,11 +184,6 @@ impl DType {
 pub enum Layout {
     Contiguous,
     Strided(Vec<Dim>),
-    View {
-        base: BufferId,
-        offset: Dim,
-        strides: Vec<Dim>,
-    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -222,7 +217,7 @@ impl TensorType {
         if shape.is_empty() {
             return vec![];
         }
-        let mut strides = vec![Dim::constant(1); shape.len()];
+        let mut strides = vec![Dim::Const(1); shape.len()];
         for i in (0..shape.len() - 1).rev() {
             strides[i] = strides[i + 1].clone() * shape[i + 1].clone();
         }
@@ -235,7 +230,6 @@ impl TensorType {
         match &self.layout {
             Layout::Contiguous => Self::compute_contiguous_strides(&self.shape),
             Layout::Strided(s) => s.clone(),
-            Layout::View { strides, .. } => strides.clone(),
         }
     }
 
@@ -244,9 +238,6 @@ impl TensorType {
         match &self.layout {
             Layout::Contiguous => true,
             Layout::Strided(strides) => *strides == Self::compute_contiguous_strides(&self.shape),
-            Layout::View { strides, .. } => {
-                *strides == Self::compute_contiguous_strides(&self.shape)
-            }
         }
     }
 }

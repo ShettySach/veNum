@@ -102,7 +102,7 @@ pub enum Dim {
 pub struct TensorType {
     pub shape:  Vec<Dim>,
     pub dtype:  DType,
-    pub layout: Layout,   // Contiguous | Strided(Vec<Dim>) | View { base, offset, strides }
+    pub layout: Layout,   // Contiguous | Strided(Vec<Dim>) | View { offset, strides }
 }
 
 pub enum DType { F32, F16, BF16, F64, I8, I16, I32, I64, U8, U16, U32, U64, Bool }

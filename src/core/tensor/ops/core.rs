@@ -1,6 +1,6 @@
 //! Core tensor operations: binary_op and unary_op.
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{anyhow, bail, Result};
 
 use crate::core::hlir::decompose;
 use crate::core::hlir::{Dim, NodeId, Op};
@@ -11,27 +11,27 @@ use crate::core::tensor::structure::Tensor;
 impl Tensor {
     fn broadcast_shape(lhs: &[Dim], rhs: &[Dim]) -> Result<Vec<Dim>> {
         let rank = lhs.len().max(rhs.len());
-        let mut out = vec![Dim::constant(1); rank];
+        let mut out = vec![Dim::Const(1); rank];
 
         for i in 0..rank {
             let l = if i < rank - lhs.len() {
                 1
+            } else if let Dim::Const(v) = lhs[i - (rank - lhs.len())] {
+                v
             } else {
-                lhs[i - (rank - lhs.len())]
-                    .as_const()
-                    .ok_or_else(|| anyhow!("broadcast currently requires constant dims"))?
+                return Err(anyhow!("broadcast currently requires constant dims"));
             };
             let r = if i < rank - rhs.len() {
                 1
+            } else if let Dim::Const(v) = rhs[i - (rank - rhs.len())] {
+                v
             } else {
-                rhs[i - (rank - rhs.len())]
-                    .as_const()
-                    .ok_or_else(|| anyhow!("broadcast currently requires constant dims"))?
+                return Err(anyhow!("broadcast currently requires constant dims"));
             };
             if l != r && l != 1 && r != 1 {
                 bail!("cannot broadcast {:?} and {:?}", lhs, rhs);
             }
-            out[i] = Dim::constant(l.max(r));
+            out[i] = Dim::Const(l.max(r));
         }
 
         Ok(out)

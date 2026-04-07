@@ -1,13 +1,13 @@
 //! Helper functions for tensor operations.
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{anyhow, bail, Result};
 use std::collections::HashSet;
 
 use crate::core::hlir::Dim;
 
 /// Compute shape after unsqueezing to a target rank (prepend 1s).
 pub(crate) fn unsqueeze_shape(shape: &[Dim], target_rank: usize) -> Vec<Dim> {
-    let mut new_shape = vec![Dim::constant(1); target_rank - shape.len()];
+    let mut new_shape = vec![Dim::Const(1); target_rank - shape.len()];
     new_shape.extend_from_slice(shape);
     new_shape
 }
@@ -15,26 +15,26 @@ pub(crate) fn unsqueeze_shape(shape: &[Dim], target_rank: usize) -> Vec<Dim> {
 /// Broadcast batch dimensions for matmul.
 pub(crate) fn broadcast_batch(a: &[Dim], b: &[Dim]) -> Result<Vec<Dim>> {
     let rank = a.len().max(b.len());
-    let mut out = vec![Dim::constant(1); rank];
+    let mut out = vec![Dim::Const(1); rank];
     for i in 0..rank {
         let da = if i < rank - a.len() {
             1
+        } else if let Dim::Const(v) = a[i - (rank - a.len())] {
+            v
         } else {
-            a[i - (rank - a.len())]
-                .as_const()
-                .ok_or_else(|| anyhow!("broadcast_batch requires Const dims"))?
+            return Err(anyhow!("broadcast_batch requires Const dims"));
         };
         let db = if i < rank - b.len() {
             1
+        } else if let Dim::Const(v) = b[i - (rank - b.len())] {
+            v
         } else {
-            b[i - (rank - b.len())]
-                .as_const()
-                .ok_or_else(|| anyhow!("broadcast_batch requires Const dims"))?
+            return Err(anyhow!("broadcast_batch requires Const dims"));
         };
         if da != db && da != 1 && db != 1 {
             bail!("batch dimensions not broadcastable: {:?} vs {:?}", a, b);
         }
-        out[i] = Dim::constant(da.max(db));
+        out[i] = Dim::Const(da.max(db));
     }
     Ok(out)
 }
@@ -60,7 +60,7 @@ pub(crate) fn compute_reduced_shape(shape: &[Dim], dims: &[usize], keepdims: boo
     for (i, s) in shape.iter().enumerate() {
         if dims_set.contains(&i) {
             if keepdims {
-                new_shape.push(Dim::constant(1));
+                new_shape.push(Dim::Const(1));
             }
         } else {
             new_shape.push(s.clone());
@@ -68,7 +68,7 @@ pub(crate) fn compute_reduced_shape(shape: &[Dim], dims: &[usize], keepdims: boo
     }
     // Ensure at least rank 1
     if new_shape.is_empty() {
-        new_shape.push(Dim::constant(1));
+        new_shape.push(Dim::Const(1));
     }
     new_shape
 }
@@ -108,13 +108,11 @@ mod tests {
             broadcast_batch(&[], &[Dim::Const(2), Dim::Const(3)]).unwrap(),
             vec![Dim::Const(2), Dim::Const(3)]
         );
-        assert!(
-            broadcast_batch(
-                &[Dim::Const(2), Dim::Const(3)],
-                &[Dim::Const(3), Dim::Const(4)]
-            )
-            .is_err()
-        );
+        assert!(broadcast_batch(
+            &[Dim::Const(2), Dim::Const(3)],
+            &[Dim::Const(3), Dim::Const(4)]
+        )
+        .is_err());
     }
 
     #[test]

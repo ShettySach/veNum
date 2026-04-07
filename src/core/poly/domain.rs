@@ -1,9 +1,65 @@
 use crate::core::hlir::{Dim, Symbol};
 use crate::core::llir::affine::{AffineExpr, Var};
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock, RwLock};
 
 // ---------------------------------------------------------------------------
 // Core types
 // ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct IterName(Arc<str>);
+
+impl IterName {
+    pub fn new(name: &str) -> Self {
+        Self(intern_iter_name(name))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for IterName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl From<&str> for IterName {
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<String> for IterName {
+    fn from(value: String) -> Self {
+        Self::new(&value)
+    }
+}
+
+static ITER_NAME_INTERNER: OnceLock<RwLock<HashMap<String, Arc<str>>>> = OnceLock::new();
+
+fn intern_iter_name(name: &str) -> Arc<str> {
+    let interner = ITER_NAME_INTERNER.get_or_init(|| RwLock::new(HashMap::new()));
+
+    {
+        let map = interner.read().expect("iter-name interner read lock poisoned");
+        if let Some(interned) = map.get(name) {
+            return Arc::clone(interned);
+        }
+    }
+
+    let mut map = interner
+        .write()
+        .expect("iter-name interner write lock poisoned");
+    if let Some(interned) = map.get(name) {
+        return Arc::clone(interned);
+    }
+    let interned: Arc<str> = Arc::from(name);
+    map.insert(name.to_owned(), Arc::clone(&interned));
+    interned
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Aff {
@@ -13,7 +69,7 @@ pub struct Aff {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PolyVar {
-    Iter(String),
+    Iter(IterName),
     Param(Symbol),
 }
 
@@ -25,7 +81,7 @@ pub enum Constraint {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Domain {
-    pub iters: Vec<String>,
+    pub iters: Vec<IterName>,
     pub params: Vec<Symbol>,
     pub constraints: Vec<Constraint>,
 }
@@ -42,7 +98,7 @@ impl Aff {
         }
     }
 
-    pub fn iter_var(name: impl Into<String>) -> Self {
+    pub fn iter_var(name: impl Into<IterName>) -> Self {
         Self {
             constant: 0,
             terms: vec![(1, PolyVar::Iter(name.into()))],
@@ -149,7 +205,7 @@ impl From<&AffineExpr> for Aff {
                 .iter()
                 .map(|(c, v)| {
                     let pv = match v {
-                        Var::Loop(name) => PolyVar::Iter(name.clone()),
+                        Var::Loop(name) => PolyVar::Iter(name.clone().into()),
                         Var::Param(sym) => PolyVar::Param(*sym),
                     };
                     (*c, pv)
@@ -168,7 +224,7 @@ impl From<&Aff> for AffineExpr {
                 .iter()
                 .map(|(c, v)| {
                     let var = match v {
-                        PolyVar::Iter(name) => Var::Loop(name.clone()),
+                        PolyVar::Iter(name) => Var::Loop(name.as_str().to_owned()),
                         PolyVar::Param(sym) => Var::Param(*sym),
                     };
                     (*c, var)
@@ -223,7 +279,7 @@ pub fn shape_to_domain_checked(shape: &[Dim]) -> Result<Domain, String> {
     let mut constraints = Vec::with_capacity(shape.len() * 2);
 
     for (i, dim) in shape.iter().enumerate() {
-        let iter = format!("i{i}");
+        let iter = IterName::from(format!("i{i}"));
         iters.push(iter.clone());
 
         // Lower bound: iter >= 0  ⟹  iter >= 0  (Ineq means expr >= 0)
@@ -235,7 +291,9 @@ pub fn shape_to_domain_checked(shape: &[Dim]) -> Result<Domain, String> {
         // Upper bound: try converting dim to affine first.
         if let Some(bound_aff) = dim_to_aff(dim) {
             // iter < bound  ⟹  bound - 1 - iter >= 0
-            let ub = bound_aff.sub(&Aff::iter_var(&iter)).add(&Aff::constant(-1));
+            let ub = bound_aff
+                .sub(&Aff::iter_var(iter.clone()))
+                .add(&Aff::constant(-1));
             // Collect any params from the affine bound.
             for (_, pv) in &ub.terms {
                 if let PolyVar::Param(sym) = pv

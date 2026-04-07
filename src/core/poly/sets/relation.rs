@@ -1,6 +1,6 @@
 use crate::core::hlir::Symbol;
 use crate::core::poly::access_map::AccessMap;
-use crate::core::poly::domain::{Aff, Constraint, Domain, PolyVar};
+use crate::core::poly::domain::{Aff, Constraint, Domain, IterName, PolyVar};
 
 /// A constraint system: separated equalities and inequalities over affine
 /// expressions.  This is the internal representation used by the relation
@@ -63,7 +63,7 @@ impl ConstraintSystem {
     pub fn add_domain_prefixed(&mut self, domain: &Domain, prefix: &str) {
         for iter in &domain.iters {
             let renamed = format!("{prefix}{iter}");
-            self.add_var(PolyVar::Iter(renamed.clone()));
+            self.add_var(PolyVar::Iter(renamed.into()));
         }
         for param in &domain.params {
             self.add_var(PolyVar::Param(*param));
@@ -139,9 +139,9 @@ impl ConstraintSystem {
 #[derive(Clone, Debug)]
 pub struct Relation {
     /// Source iterator names (un-prefixed).
-    pub source_iters: Vec<String>,
+    pub source_iters: Vec<IterName>,
     /// Sink iterator names (un-prefixed).
-    pub sink_iters: Vec<String>,
+    pub sink_iters: Vec<IterName>,
     /// Shared parameters.
     pub params: Vec<Symbol>,
     /// The combined constraint system (source domain + sink domain +
@@ -252,16 +252,19 @@ impl Relation {
 
     /// Prefixed source iterator name.
     pub fn source_var(&self, iter: &str) -> PolyVar {
-        PolyVar::Iter(format!("{}{iter}", Self::SOURCE_PREFIX))
+        PolyVar::Iter(format!("{}{iter}", Self::SOURCE_PREFIX).into())
     }
 
     /// Prefixed sink iterator name.
     pub fn sink_var(&self, iter: &str) -> PolyVar {
-        PolyVar::Iter(format!("{}{iter}", Self::SINK_PREFIX))
+        PolyVar::Iter(format!("{}{iter}", Self::SINK_PREFIX).into())
     }
 }
 
-pub fn shared_iter_names<'a>(source_iters: &'a [String], sink_iters: &[String]) -> Vec<&'a String> {
+pub fn shared_iter_names<'a>(
+    source_iters: &'a [IterName],
+    sink_iters: &[IterName],
+) -> Vec<&'a IterName> {
     source_iters
         .iter()
         .filter(|i| sink_iters.contains(i))
@@ -273,7 +276,7 @@ pub fn shared_iter_names<'a>(source_iters: &'a [String], sink_iters: &[String]) 
 // ---------------------------------------------------------------------------
 
 /// Rename iterator variables in an `Aff` by adding a prefix.
-fn rename_iters(aff: &Aff, domain_iters: &[String], prefix: &str) -> Aff {
+fn rename_iters(aff: &Aff, domain_iters: &[IterName], prefix: &str) -> Aff {
     Aff {
         constant: aff.constant,
         terms: aff
@@ -282,7 +285,7 @@ fn rename_iters(aff: &Aff, domain_iters: &[String], prefix: &str) -> Aff {
             .map(|(c, v)| {
                 let renamed = match v {
                     PolyVar::Iter(name) if domain_iters.contains(name) => {
-                        PolyVar::Iter(format!("{prefix}{name}"))
+                        PolyVar::Iter(format!("{prefix}{name}").into())
                     }
                     other => other.clone(),
                 };

@@ -15,7 +15,7 @@ impl Tensor {
 
     /// Create a constant tensor from a scalar value.
     pub fn constant_scalar(cx: &Context, value: Scalar, shape: Vec<i64>) -> Self {
-        let dim_shape: Vec<Dim> = shape.into_iter().map(Dim::constant).collect();
+        let dim_shape: Vec<Dim> = shape.into_iter().map(Dim::Const).collect();
         let dtype = value.dtype();
         let graph = cx.graph();
         let id = graph

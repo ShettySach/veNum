@@ -1,8 +1,8 @@
 //! Matrix multiplication for tensors.
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{anyhow, bail, Result};
 
-use crate::core::hlir::{Dim, decompose};
+use crate::core::hlir::{decompose, Dim};
 use crate::core::tensor::helpers::broadcast_batch;
 use crate::core::tensor::structure::Tensor;
 
@@ -31,18 +31,26 @@ impl Tensor {
             );
         }
 
-        let m = a_shape[a_shape.len() - 2]
-            .as_const()
-            .ok_or_else(|| anyhow!("matmul currently requires constant dimensions"))?;
-        let k = a_shape[a_shape.len() - 1]
-            .as_const()
-            .ok_or_else(|| anyhow!("matmul currently requires constant dimensions"))?;
-        let k_ = b_shape[b_shape.len() - 2]
-            .as_const()
-            .ok_or_else(|| anyhow!("matmul currently requires constant dimensions"))?;
-        let n = b_shape[b_shape.len() - 1]
-            .as_const()
-            .ok_or_else(|| anyhow!("matmul currently requires constant dimensions"))?;
+        let m = if let Dim::Const(v) = a_shape[a_shape.len() - 2] {
+            v
+        } else {
+            return Err(anyhow!("matmul currently requires constant dimensions"));
+        };
+        let k = if let Dim::Const(v) = a_shape[a_shape.len() - 1] {
+            v
+        } else {
+            return Err(anyhow!("matmul currently requires constant dimensions"));
+        };
+        let k_ = if let Dim::Const(v) = b_shape[b_shape.len() - 2] {
+            v
+        } else {
+            return Err(anyhow!("matmul currently requires constant dimensions"));
+        };
+        let n = if let Dim::Const(v) = b_shape[b_shape.len() - 1] {
+            v
+        } else {
+            return Err(anyhow!("matmul currently requires constant dimensions"));
+        };
 
         if k != k_ {
             bail!(
@@ -57,8 +65,8 @@ impl Tensor {
         let batch = broadcast_batch(batch_a, batch_b)?;
         let id = self.with_graph_mut(|g| decompose::matmul(g, self.id, rhs.id));
         let mut out_shape = batch;
-        out_shape.push(Dim::constant(m));
-        out_shape.push(Dim::constant(n));
+        out_shape.push(Dim::Const(m));
+        out_shape.push(Dim::Const(n));
         Ok(self.derived(id, out_shape))
     }
 }

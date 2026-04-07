@@ -1,7 +1,8 @@
 //! Convolution operations for tensors.
 
+use crate::core::hlir::Dim;
 use crate::core::tensor::structure::Tensor;
-use anyhow::{Result, anyhow, bail};
+use anyhow::{anyhow, bail, Result};
 
 impl Tensor {
     /// 2D convolution using the shifted-slice decomposition from the spec.
@@ -34,31 +35,47 @@ impl Tensor {
             );
         }
 
-        let batch_size = self.shape[0]
-            .as_const()
-            .ok_or_else(|| anyhow!("conv2d requires constant batch dimension"))?;
-        let channels_in = self.shape[1]
-            .as_const()
-            .ok_or_else(|| anyhow!("conv2d requires constant channels_in"))?;
-        let inp_height = self.shape[2]
-            .as_const()
-            .ok_or_else(|| anyhow!("conv2d requires constant input height"))?;
-        let inp_width = self.shape[3]
-            .as_const()
-            .ok_or_else(|| anyhow!("conv2d requires constant input width"))?;
+        let batch_size = if let Dim::Const(v) = self.shape[0] {
+            v
+        } else {
+            return Err(anyhow!("conv2d requires constant batch dimension"));
+        };
+        let channels_in = if let Dim::Const(v) = self.shape[1] {
+            v
+        } else {
+            return Err(anyhow!("conv2d requires constant channels_in"));
+        };
+        let inp_height = if let Dim::Const(v) = self.shape[2] {
+            v
+        } else {
+            return Err(anyhow!("conv2d requires constant input height"));
+        };
+        let inp_width = if let Dim::Const(v) = self.shape[3] {
+            v
+        } else {
+            return Err(anyhow!("conv2d requires constant input width"));
+        };
 
-        let channels_out = weight.shape[0]
-            .as_const()
-            .ok_or_else(|| anyhow!("conv2d requires constant channels_out"))?;
-        let kernel_channels_in = weight.shape[1]
-            .as_const()
-            .ok_or_else(|| anyhow!("conv2d requires constant kernel channels_in"))?;
-        let kernel_height = weight.shape[2]
-            .as_const()
-            .ok_or_else(|| anyhow!("conv2d requires constant kernel height"))?;
-        let kernel_width = weight.shape[3]
-            .as_const()
-            .ok_or_else(|| anyhow!("conv2d requires constant kernel width"))?;
+        let channels_out = if let Dim::Const(v) = weight.shape[0] {
+            v
+        } else {
+            return Err(anyhow!("conv2d requires constant channels_out"));
+        };
+        let kernel_channels_in = if let Dim::Const(v) = weight.shape[1] {
+            v
+        } else {
+            return Err(anyhow!("conv2d requires constant kernel channels_in"));
+        };
+        let kernel_height = if let Dim::Const(v) = weight.shape[2] {
+            v
+        } else {
+            return Err(anyhow!("conv2d requires constant kernel height"));
+        };
+        let kernel_width = if let Dim::Const(v) = weight.shape[3] {
+            v
+        } else {
+            return Err(anyhow!("conv2d requires constant kernel width"));
+        };
 
         if channels_in != kernel_channels_in {
             bail!(
@@ -174,31 +191,47 @@ impl Tensor {
             );
         }
 
-        let batch_size = self.shape[0]
-            .as_const()
-            .ok_or_else(|| anyhow!("conv2d requires constant batch dimension"))?;
-        let channels_in = self.shape[1]
-            .as_const()
-            .ok_or_else(|| anyhow!("conv2d requires constant channels_in"))?;
-        let inp_height = self.shape[2]
-            .as_const()
-            .ok_or_else(|| anyhow!("conv2d requires constant input height"))?;
-        let inp_width = self.shape[3]
-            .as_const()
-            .ok_or_else(|| anyhow!("conv2d requires constant input width"))?;
+        let batch_size = if let Dim::Const(v) = self.shape[0] {
+            v
+        } else {
+            return Err(anyhow!("conv2d requires constant batch dimension"));
+        };
+        let channels_in = if let Dim::Const(v) = self.shape[1] {
+            v
+        } else {
+            return Err(anyhow!("conv2d requires constant channels_in"));
+        };
+        let inp_height = if let Dim::Const(v) = self.shape[2] {
+            v
+        } else {
+            return Err(anyhow!("conv2d requires constant input height"));
+        };
+        let inp_width = if let Dim::Const(v) = self.shape[3] {
+            v
+        } else {
+            return Err(anyhow!("conv2d requires constant input width"));
+        };
 
-        let channels_out = weight.shape[0]
-            .as_const()
-            .ok_or_else(|| anyhow!("conv2d requires constant channels_out"))?;
-        let kernel_channels_in = weight.shape[1]
-            .as_const()
-            .ok_or_else(|| anyhow!("conv2d requires constant kernel channels_in"))?;
-        let kernel_height = weight.shape[2]
-            .as_const()
-            .ok_or_else(|| anyhow!("conv2d requires constant kernel height"))?;
-        let kernel_width = weight.shape[3]
-            .as_const()
-            .ok_or_else(|| anyhow!("conv2d requires constant kernel width"))?;
+        let channels_out = if let Dim::Const(v) = weight.shape[0] {
+            v
+        } else {
+            return Err(anyhow!("conv2d requires constant channels_out"));
+        };
+        let kernel_channels_in = if let Dim::Const(v) = weight.shape[1] {
+            v
+        } else {
+            return Err(anyhow!("conv2d requires constant kernel channels_in"));
+        };
+        let kernel_height = if let Dim::Const(v) = weight.shape[2] {
+            v
+        } else {
+            return Err(anyhow!("conv2d requires constant kernel height"));
+        };
+        let kernel_width = if let Dim::Const(v) = weight.shape[3] {
+            v
+        } else {
+            return Err(anyhow!("conv2d requires constant kernel width"));
+        };
 
         if channels_in != kernel_channels_in {
             bail!(
@@ -295,18 +328,26 @@ impl Tensor {
         stride_h: i64,
         stride_w: i64,
     ) -> Result<Tensor> {
-        let batch = self.shape[0]
-            .as_const()
-            .ok_or_else(|| anyhow!("_pool2d requires constant batch"))?;
-        let channels = self.shape[1]
-            .as_const()
-            .ok_or_else(|| anyhow!("_pool2d requires constant channels"))?;
-        let height = self.shape[2]
-            .as_const()
-            .ok_or_else(|| anyhow!("_pool2d requires constant height"))?;
-        let width = self.shape[3]
-            .as_const()
-            .ok_or_else(|| anyhow!("_pool2d requires constant width"))?;
+        let batch = if let Dim::Const(v) = self.shape[0] {
+            v
+        } else {
+            return Err(anyhow!("_pool2d requires constant batch"));
+        };
+        let channels = if let Dim::Const(v) = self.shape[1] {
+            v
+        } else {
+            return Err(anyhow!("_pool2d requires constant channels"));
+        };
+        let height = if let Dim::Const(v) = self.shape[2] {
+            v
+        } else {
+            return Err(anyhow!("_pool2d requires constant height"));
+        };
+        let width = if let Dim::Const(v) = self.shape[3] {
+            v
+        } else {
+            return Err(anyhow!("_pool2d requires constant width"));
+        };
 
         let out_height = (height - kernel_height) / stride_h + 1;
         let out_width = (width - kernel_width) / stride_w + 1;

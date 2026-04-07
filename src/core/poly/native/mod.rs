@@ -7,7 +7,7 @@ use anyhow::Result;
 use super::analysis::dependence::analyze_kernel_poly;
 use super::analysis::legality;
 use super::access_map::memory_access_to_access_map;
-use super::domain::{Aff, Constraint, Domain};
+use super::domain::{Aff, Constraint, Domain, IterName};
 use super::sets::Relation;
 
 use crate::core::hlir::Symbol;
@@ -89,8 +89,16 @@ impl DependenceAnalyzer for NativeDependenceAnalyzer {
         };
 
         Ok(Some(DependenceRelation {
-            source_vars: rel.source_iters.clone(),
-            sink_vars: rel.sink_iters.clone(),
+            source_vars: rel
+                .source_iters
+                .iter()
+                .map(|n| n.as_str().to_owned())
+                .collect(),
+            sink_vars: rel
+                .sink_iters
+                .iter()
+                .map(|n| n.as_str().to_owned())
+                .collect(),
             constraints: relation_constraints_to_llir(&rel),
         }))
     }
@@ -102,16 +110,16 @@ fn loops_to_domain(loops: &[Loop]) -> Domain {
     let mut constraints = Vec::with_capacity(loops.len() * 4);
 
     for lp in loops {
-        iters.push(lp.var.clone());
+        iters.push(IterName::from(lp.var.clone()));
         collect_params(&lp.lower, &mut params);
         collect_params(&lp.upper, &mut params);
 
         constraints.push(Constraint::Ineq(
-            Aff::iter_var(&lp.var).sub(&Aff::from(&lp.lower)),
+            Aff::iter_var(lp.var.as_str()).sub(&Aff::from(&lp.lower)),
         ));
         constraints.push(Constraint::Ineq(
             Aff::from(&lp.upper)
-                .sub(&Aff::iter_var(&lp.var))
+                .sub(&Aff::iter_var(lp.var.as_str()))
                 .add(&Aff::constant(-1)),
         ));
     }

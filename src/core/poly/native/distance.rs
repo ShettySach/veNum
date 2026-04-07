@@ -1,4 +1,4 @@
-use crate::core::poly::domain::PolyVar;
+use crate::core::poly::domain::{IterName, PolyVar};
 use crate::core::poly::sets::relation::ConstraintSystem;
 
 /// Per-loop-dimension direction summary.
@@ -26,12 +26,12 @@ pub enum Direction {
 /// - `directions`: per-dimension `Direction` summary.
 pub fn compute_distance(
     system: &ConstraintSystem,
-    source_iters: &[String],
-    sink_iters: &[String],
+    source_iters: &[IterName],
+    sink_iters: &[IterName],
     source_prefix: &str,
     sink_prefix: &str,
 ) -> (Option<Vec<i64>>, Vec<Direction>) {
-    let shared_iters: Vec<&String> = source_iters
+    let shared_iters: Vec<&IterName> = source_iters
         .iter()
         .filter(|i| sink_iters.contains(i))
         .collect();
@@ -41,8 +41,8 @@ pub fn compute_distance(
     let mut all_exact = true;
 
     for iter in &shared_iters {
-        let s_var = PolyVar::Iter(format!("{source_prefix}{iter}"));
-        let t_var = PolyVar::Iter(format!("{sink_prefix}{iter}"));
+        let s_var = PolyVar::Iter(format!("{source_prefix}{iter}").into());
+        let t_var = PolyVar::Iter(format!("{sink_prefix}{iter}").into());
 
         match try_exact_distance(system, &s_var, &t_var) {
             Some(d) => {
@@ -63,11 +63,7 @@ pub fn compute_distance(
         }
     }
 
-    let dist = if all_exact {
-        Some(distances)
-    } else {
-        None
-    };
+    let dist = if all_exact { Some(distances) } else { None };
 
     (dist, directions)
 }
@@ -76,11 +72,7 @@ pub fn compute_distance(
 /// system.
 ///
 /// Looks for an equality of the form `t - s + c = 0` (i.e. `t - s = -c`).
-fn try_exact_distance(
-    system: &ConstraintSystem,
-    s_var: &PolyVar,
-    t_var: &PolyVar,
-) -> Option<i64> {
+fn try_exact_distance(system: &ConstraintSystem, s_var: &PolyVar, t_var: &PolyVar) -> Option<i64> {
     let sys = system.clone();
 
     for eq in &sys.equalities {
@@ -118,11 +110,7 @@ fn try_exact_distance(
 }
 
 /// Derive a conservative direction for `t - s` from inequalities.
-fn derive_direction(
-    system: &ConstraintSystem,
-    s_var: &PolyVar,
-    t_var: &PolyVar,
-) -> Direction {
+fn derive_direction(system: &ConstraintSystem, s_var: &PolyVar, t_var: &PolyVar) -> Direction {
     // Introduce a delta variable: delta = t - s.
     // We build a system with delta replacing t, then project out s and t
     // to get bounds on delta.

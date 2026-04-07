@@ -17,27 +17,6 @@ pub enum Dim {
     Mod(Box<Dim>, Box<Dim>),
 }
 
-impl Dim {
-    pub fn constant(value: i64) -> Self {
-        Self::Const(value)
-    }
-
-    pub fn symbol(symbol: Symbol) -> Self {
-        Self::Sym(symbol)
-    }
-
-    pub fn modulo(lhs: Dim, rhs: Dim) -> Self {
-        Self::Mod(Box::new(lhs), Box::new(rhs))
-    }
-
-    pub fn as_const(&self) -> Option<i64> {
-        match self {
-            Dim::Const(v) => Some(*v),
-            _ => None,
-        }
-    }
-}
-
 impl std::ops::Add for Dim {
     type Output = Self;
 

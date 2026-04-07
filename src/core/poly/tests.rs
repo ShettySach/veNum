@@ -6,11 +6,12 @@ mod poly_tests {
     use crate::core::llir::affine::{AffineExpr, Var};
     use crate::core::lower::lower;
     use crate::core::poly::analysis::dependence::analyze_kernel_poly;
-    use crate::core::poly::native::feasibility::{check_feasibility, Feasibility};
+    use crate::core::poly::native::feasibility::{Feasibility, check_feasibility};
     use crate::core::poly::native::fm;
     use crate::core::poly::{
-        dim_to_aff, extract_instances, project_out, shape_to_domain, shape_to_domain_checked,
-        strides_to_access, Aff, ConstraintSystem, NativeDependenceAnalyzer, PolyVar, Relation,
+        Aff, ConstraintSystem, NativeDependenceAnalyzer, PolyVar, Relation, dim_to_aff,
+        extract_instances, project_out, shape_to_domain, shape_to_domain_checked,
+        strides_to_access,
     };
     use crate::core::schedule::search::{ScheduleSearcher, TrivialHardware};
     use crate::core::traits::{DependenceAnalyzer, ScheduleTransform};
@@ -22,7 +23,7 @@ mod poly_tests {
     #[test]
     fn shape_to_domain_emits_two_constraints_per_dim() {
         let domain = shape_to_domain(&[Dim::Const(8), Dim::Const(16)]);
-        assert_eq!(domain.iters, vec!["i0", "i1"]);
+        assert_eq!(domain.iters, vec!["i0".into(), "i1".into()]);
         assert_eq!(domain.constraints.len(), 4);
     }
 
@@ -243,7 +244,8 @@ mod poly_tests {
 
     #[test]
     fn strides_to_access_rejects_symbolic_stride() {
-        let err = strides_to_access(&[Dim::Sym(0_u32.into())], &["i0".to_owned()]).unwrap_err();
+        let err =
+            strides_to_access(&[Dim::Sym(0_u32.into())], &["i0".to_owned().into()]).unwrap_err();
         assert!(err.to_string().contains("symbolic stride"));
     }
 
@@ -780,8 +782,8 @@ mod poly_tests {
         let rel = Relation::build_dependence(&domain, &domain, &access, &access);
 
         // Source and sink iterators.
-        assert_eq!(rel.source_iters, vec!["i0"]);
-        assert_eq!(rel.sink_iters, vec!["i0"]);
+        assert_eq!(rel.source_iters, vec!["i0".into()]);
+        assert_eq!(rel.sink_iters, vec!["i0".into()]);
 
         // Should have: 2 source bounds + 2 sink bounds = 4 inequalities,
         // 1 memory-equality, 1 execution-order inequality.
@@ -1261,9 +1263,10 @@ mod poly_tests {
         );
 
         // All dependences should be RAW.
-        assert!(deps
-            .iter()
-            .all(|d| d.kind == crate::core::llir::DepKind::Raw));
+        assert!(
+            deps.iter()
+                .all(|d| d.kind == crate::core::llir::DepKind::Raw)
+        );
         Ok(())
     }
 

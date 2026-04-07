@@ -7,7 +7,7 @@ use crate::core::llir::program::Kernel;
 use crate::core::llir::stmt::{AbstractVectorOp, BinaryOp, Expr, Stmt};
 
 use crate::core::poly::access_map::{AccessMap, memory_access_to_access_map};
-use crate::core::poly::domain::{Aff, Constraint, Domain};
+use crate::core::poly::domain::{Aff, Constraint, Domain, IterName};
 
 /// A normalized polyhedral view of a single LLIR statement.
 #[derive(Clone, Debug)]
@@ -39,7 +39,7 @@ pub fn extract_instances(kernel: &Kernel) -> Vec<StatementInstance> {
 // ---------------------------------------------------------------------------
 
 struct DomainCtx {
-    iters: Vec<String>,
+    iters: Vec<IterName>,
     params: Vec<Symbol>,
     constraints: Vec<Constraint>,
 }
@@ -53,7 +53,7 @@ impl DomainCtx {
         }
     }
 
-    fn loop_vars(&self) -> Vec<String> {
+    fn loop_vars(&self) -> Vec<IterName> {
         self.iters.clone()
     }
 
@@ -80,17 +80,19 @@ impl DomainCtx {
 
     fn add_loop(&mut self, lp: &Loop) {
         let var = &lp.var;
-        self.iters.push(var.clone());
+        self.iters.push(var.clone().into());
 
         // lower bound: var - lower >= 0
         let lb_aff = affine_expr_to_aff(&lp.lower);
         self.constraints
-            .push(Constraint::Ineq(Aff::iter_var(var).sub(&lb_aff)));
+            .push(Constraint::Ineq(Aff::iter_var(var.as_str()).sub(&lb_aff)));
 
         // upper bound: upper - 1 - var >= 0
         let ub_aff = affine_expr_to_aff(&lp.upper);
         self.constraints.push(Constraint::Ineq(
-            ub_aff.sub(&Aff::iter_var(var)).add(&Aff::constant(-1)),
+            ub_aff
+                .sub(&Aff::iter_var(var.as_str()))
+                .add(&Aff::constant(-1)),
         ));
 
         // Collect params from bounds.
@@ -195,7 +197,7 @@ fn extract_from_body(
 
 fn collect_expr_accesses(
     expr: &Expr,
-    loop_vars: &[String],
+    loop_vars: &[IterName],
     reads: &mut Vec<AccessMap>,
     writes: &mut Vec<AccessMap>,
 ) {
@@ -228,7 +230,7 @@ fn collect_expr_accesses(
 
 fn collect_vector_accesses(
     op: &AbstractVectorOp,
-    loop_vars: &[String],
+    loop_vars: &[IterName],
     reads: &mut Vec<AccessMap>,
     writes: &mut Vec<AccessMap>,
 ) {
@@ -358,13 +360,13 @@ fn scalar_to_i64(s: &Scalar) -> Option<i64> {
 fn vector_memory_access(
     base: BufferId,
     indices: &Expr,
-    loop_vars: &[String],
+    loop_vars: &[IterName],
     access_kind: AccessKind,
 ) -> AccessMap {
     let idx_aff = expr_to_aff(indices).unwrap_or_else(|| {
         loop_vars
             .first()
-            .map(|v| Aff::iter_var(v))
+            .map(|v| Aff::iter_var(v.clone()))
             .unwrap_or_else(|| Aff::constant(0))
     });
 

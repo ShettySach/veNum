@@ -141,8 +141,8 @@ impl HLIRGraph {
         let shape: Vec<Dim> = ranges
             .iter()
             .map(|r| match (&r.start, &r.end) {
-                (Dim::Const(s), Dim::Const(e)) => Dim::constant(e - s),
-                _ => r.end.clone() + Dim::constant(-1) * r.start.clone(),
+                (Dim::Const(s), Dim::Const(e)) => Dim::Const(e - s),
+                _ => r.end.clone() + Dim::Const(-1) * r.start.clone(),
             })
             .collect();
 
@@ -161,11 +161,9 @@ impl HLIRGraph {
             .iter()
             .zip(shape.iter())
             .zip(in_strides.iter())
-            .map(|((in_dim, out_dim), in_stride)| {
-                match (in_dim.as_const(), out_dim.as_const()) {
-                    (Some(1), Some(out_d)) if out_d > 1 => Dim::constant(0), // Broadcast: zero stride
-                    _ => in_stride.clone(),                                  // Keep original stride
-                }
+            .map(|((in_dim, out_dim), in_stride)| match (in_dim, out_dim) {
+                (Dim::Const(1), Dim::Const(out_d)) if *out_d > 1 => Dim::Const(0),
+                _ => in_stride.clone(),
             })
             .collect();
 
@@ -182,8 +180,8 @@ impl HLIRGraph {
             let ty = self.ty(inp);
             let a = &shape[axis];
             let b = &ty.shape[axis];
-            shape[axis] = match (a.as_const(), b.as_const()) {
-                (Some(av), Some(bv)) => Dim::constant(av + bv),
+            shape[axis] = match (a, b) {
+                (Dim::Const(av), Dim::Const(bv)) => Dim::Const(av + bv),
                 _ => a.clone() + b.clone(),
             };
         }
@@ -204,7 +202,7 @@ fn reduce_shape(shape: &[Dim], axes: &[usize], keepdim: bool) -> Vec<Dim> {
             .enumerate()
             .map(|(i, d)| {
                 if axes.contains(&i) {
-                    Dim::constant(1)
+                    Dim::Const(1)
                 } else {
                     d.clone()
                 }

@@ -1,18 +1,18 @@
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 
 use crate::core::hlir::{BufferId, Dim};
 use crate::core::llir::MemoryAccess;
 
-use super::domain::{Aff, PolyVar};
+use super::domain::{Aff, IterName, PolyVar};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccessMap {
     pub buffer: BufferId,
-    pub domain_iters: Vec<String>,
+    pub domain_iters: Vec<IterName>,
     pub mapping: Vec<Aff>,
 }
 
-pub fn strides_to_access(strides: &[Dim], domain_iters: &[String]) -> Result<AccessMap> {
+pub fn strides_to_access(strides: &[Dim], domain_iters: &[IterName]) -> Result<AccessMap> {
     if strides.len() != domain_iters.len() {
         bail!(
             "strides/domain rank mismatch: {} vs {}",
@@ -27,9 +27,11 @@ pub fn strides_to_access(strides: &[Dim], domain_iters: &[String]) -> Result<Acc
     };
 
     for (iter, stride) in domain_iters.iter().zip(strides.iter()) {
-        let c = stride
-            .as_const()
-            .ok_or_else(|| anyhow::anyhow!("symbolic stride is not affine-lowerable"))?;
+        let c = if let Dim::Const(v) = stride {
+            *v
+        } else {
+            return Err(anyhow::anyhow!("symbolic stride is not affine-lowerable"));
+        };
         aff.terms.push((c, PolyVar::Iter(iter.clone())));
     }
 
@@ -40,7 +42,7 @@ pub fn strides_to_access(strides: &[Dim], domain_iters: &[String]) -> Result<Acc
     })
 }
 
-pub fn memory_access_to_access_map(access: &MemoryAccess, loop_vars: &[String]) -> AccessMap {
+pub fn memory_access_to_access_map(access: &MemoryAccess, loop_vars: &[IterName]) -> AccessMap {
     let mapping = access
         .indices
         .iter()
@@ -50,7 +52,9 @@ pub fn memory_access_to_access_map(access: &MemoryAccess, loop_vars: &[String]) 
                 .terms
                 .iter()
                 .map(|(coeff, v)| match v {
-                    crate::core::llir::Var::Loop(name) => (*coeff, PolyVar::Iter(name.clone())),
+                    crate::core::llir::Var::Loop(name) => {
+                        (*coeff, PolyVar::Iter(name.clone().into()))
+                    }
                     crate::core::llir::Var::Param(sym) => (*coeff, PolyVar::Param(*sym)),
                 })
                 .collect(),

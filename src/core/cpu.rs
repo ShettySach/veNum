@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 
 use crate::core::compile::OutputRemapper;
-use crate::core::hlir::{BufferId, DType, Dim, NodeId, Op, Scalar, TensorType, op::CmpOp};
+use crate::core::hlir::{op::CmpOp, BufferId, DType, Dim, NodeId, Op, Scalar, TensorType};
 use crate::core::llir::LLIRProgram;
 use crate::core::traits::CodeGenerator;
 
@@ -530,16 +530,16 @@ fn slice(v: &TensorValue, ranges: &[crate::core::hlir::Range]) -> Result<TensorV
     let mut starts = Vec::with_capacity(ranges.len());
     let mut out_shape = Vec::with_capacity(ranges.len());
     for (i, r) in ranges.iter().enumerate() {
-        let s = r
-            .start
-            .as_const()
-            .ok_or_else(|| anyhow::anyhow!("slice requires const ranges"))?
-            as usize;
-        let e = r
-            .end
-            .as_const()
-            .ok_or_else(|| anyhow::anyhow!("slice requires const ranges"))?
-            as usize;
+        let s = if let Dim::Const(v) = r.start {
+            v as usize
+        } else {
+            return Err(anyhow::anyhow!("slice requires const ranges"));
+        };
+        let e = if let Dim::Const(v) = r.end {
+            v as usize
+        } else {
+            return Err(anyhow::anyhow!("slice requires const ranges"));
+        };
         if s > e || e > v.shape[i] {
             bail!("slice out of bounds");
         }
