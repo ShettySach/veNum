@@ -1,6 +1,6 @@
 use crate::core::poly::domain::{Aff, PolyVar};
+use crate::core::poly::sets::project::try_project_out_exact;
 use crate::core::poly::sets::ConstraintSystem;
-use crate::core::poly::sets::project::project_out;
 
 use super::fm;
 
@@ -20,9 +20,9 @@ pub enum Feasibility {
 /// Strategy (pragmatic hybrid):
 /// 1. Trivial contradiction scan.
 /// 2. Eliminate all equalities by substitution.
-/// 3. Propagate bounds and check for empty intervals.
-/// 4. If few variables remain with concrete bounds, enumerate.
-/// 5. Otherwise return `Unknown` (conservative).
+/// 3. Try exact projection to expose contradictions.
+/// 4. If few variables remain with concrete non-symbolic bounds, enumerate.
+/// 5. Otherwise return `Unknown` (proof-oriented).
 pub fn check_feasibility(system: &ConstraintSystem) -> Feasibility {
     let mut sys = system.clone();
     sys.canonicalize();
@@ -50,8 +50,11 @@ pub fn check_feasibility(system: &ConstraintSystem) -> Feasibility {
 
     // If no iter variables remain, check the residual constant constraints.
     if iter_vars.is_empty() {
-        return if fm::is_trivially_infeasible(&sys) {
-            Feasibility::Infeasible
+        if fm::is_trivially_infeasible(&sys) {
+            return Feasibility::Infeasible;
+        }
+        return if has_symbolic_params_in_constraints(&sys) {
+            Feasibility::Unknown
         } else {
             Feasibility::Feasible
         };
@@ -61,34 +64,36 @@ pub fn check_feasibility(system: &ConstraintSystem) -> Feasibility {
     //    If the resulting system (purely constants/params) is infeasible,
     //    then the original is infeasible.
     let mut projected = sys.clone();
+    let mut projected_all_iters = true;
     for var in &iter_vars {
-        projected = project_out(&projected, var);
+        match try_project_out_exact(&projected, var) {
+            Some(next) => projected = next,
+            None => {
+                projected_all_iters = false;
+                break;
+            }
+        }
         projected.canonicalize();
         if fm::is_trivially_infeasible(&projected) {
             return Feasibility::Infeasible;
         }
     }
 
-    // 5. If all variables were projected and no contradiction, the system
-    //    has at least one rational solution.  For systems with only
-    //    unit-coefficient equalities/inequalities on iters, the rational
-    //    solution is also an integer solution.
-    //
-    //    If params remain, we assume they are positive (runtime sizes),
-    //    so feasibility holds for any valid param assignment.
-    let remaining_iters = projected
-        .vars
-        .iter()
-        .any(|v| matches!(v, PolyVar::Iter(_)));
-
-    if !remaining_iters {
-        // All iters eliminated.  Check if residual is satisfiable.
-        if fm::is_trivially_infeasible(&projected) {
-            return Feasibility::Infeasible;
+    // 5. If all iterator variables were projected exactly and no contradiction,
+    //    we can only claim feasibility when no symbolic parameters remain.
+    if projected_all_iters {
+        let remaining_iters = projected.vars.iter().any(|v| matches!(v, PolyVar::Iter(_)));
+        if !remaining_iters {
+            if fm::is_trivially_infeasible(&projected) {
+                return Feasibility::Infeasible;
+            }
+            let has_param_terms = has_symbolic_params_in_constraints(&projected);
+            return if has_param_terms {
+                Feasibility::Unknown
+            } else {
+                Feasibility::Feasible
+            };
         }
-        // If only param constraints remain (or nothing), we assume
-        // feasible for valid param values.
-        return Feasibility::Feasible;
     }
 
     // 6. For small systems with concrete bounds, try integer enumeration.
@@ -118,9 +123,10 @@ fn eliminate_all_equalities(mut sys: ConstraintSystem) -> ConstraintSystem {
         });
 
         match candidate {
-            Some((_idx, var)) => {
-                sys = project_out(&sys, &var);
-            }
+            Some((_idx, var)) => match try_project_out_exact(&sys, &var) {
+                Some(next) => sys = next,
+                None => break,
+            },
             None => break,
         }
     }
@@ -138,10 +144,11 @@ const MAX_ENUM_ITERATIONS: u64 = 10_000;
 ///
 /// Only works when all remaining iter variables have concrete (constant)
 /// lower and upper bounds derivable from the inequality system.
-fn try_bounded_enumeration(
-    sys: &ConstraintSystem,
-    iter_vars: &[PolyVar],
-) -> Option<Feasibility> {
+fn try_bounded_enumeration(sys: &ConstraintSystem, iter_vars: &[PolyVar]) -> Option<Feasibility> {
+    if has_symbolic_params_in_constraints(sys) {
+        return None;
+    }
+
     // Collect concrete bounds for each variable.
     let mut var_bounds: Vec<(PolyVar, i64, i64)> = Vec::new();
 
@@ -258,9 +265,20 @@ fn evaluate(aff: &Aff, assignment: &[(PolyVar, i64)]) -> i64 {
         if let Some((_, v)) = assignment.iter().find(|(av, _)| av == var) {
             val += coeff * v;
         }
-        // Parameters not in assignment are treated as 0 (conservative).
+        // Parameters are rejected by `try_bounded_enumeration`.
     }
     val
+}
+
+fn has_symbolic_params_in_constraints(sys: &ConstraintSystem) -> bool {
+    sys.equalities
+        .iter()
+        .chain(sys.inequalities.iter())
+        .any(|aff| {
+            aff.terms
+                .iter()
+                .any(|(_, v)| matches!(v, PolyVar::Param(_)))
+        })
 }
 
 // ---------------------------------------------------------------------------

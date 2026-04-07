@@ -9,30 +9,48 @@ use crate::core::poly::native::fm;
 /// 1. If an equality contains the target variable, solve for it and
 ///    substitute into all other constraints, then remove the equality.
 /// 2. Otherwise apply Fourier-Motzkin elimination over the inequalities.
-/// 3. If FM would blow up, fall back to conservatively dropping all
-///    inequalities mentioning the variable (a relaxation).
+/// 3. If exact elimination is unavailable, keep the original system.
 ///
-/// Returns a new `ConstraintSystem` without the eliminated variable.
+/// Returns a new `ConstraintSystem` without the eliminated variable when
+/// exact elimination is available, otherwise returns the original system.
 pub fn project_out(system: &ConstraintSystem, var: &PolyVar) -> ConstraintSystem {
+    match try_project_out_exact(system, var) {
+        Some(sys) => sys,
+        None => system.clone(),
+    }
+}
+
+/// Try to project (eliminate) a variable exactly.
+///
+/// Returns `None` when this module cannot eliminate `var` without relaxing
+/// constraints.
+pub fn try_project_out_exact(system: &ConstraintSystem, var: &PolyVar) -> Option<ConstraintSystem> {
     let mut sys = system.clone();
     sys.canonicalize();
 
     // Try equality-based elimination first.
     if let Some(idx) = find_equality_with_var(&sys, var) {
         eliminate_via_equality(&mut sys, idx, var);
+    } else if equality_mentions_var(&sys, var) {
+        // A non-unit equality contains `var`; exact elimination would require
+        // division in Presburger space, so bail out.
+        return None;
     } else if let Some(new_ineqs) = fm::fourier_motzkin_eliminate(&sys, var) {
         // FM succeeded — replace the inequality set.
         sys.inequalities = new_ineqs;
     } else {
-        // FM would blow up — conservative fallback: drop constraints
-        // that mention the variable (relaxation).
-        sys.inequalities.retain(|a| a.coefficient_of(var) == 0);
+        // Unable to eliminate exactly.
+        return None;
     }
 
     // Remove the variable from the var list.
     sys.vars.retain(|v| v != var);
     sys.simplify();
-    sys
+    Some(sys)
+}
+
+fn equality_mentions_var(sys: &ConstraintSystem, var: &PolyVar) -> bool {
+    sys.equalities.iter().any(|a| a.coefficient_of(var) != 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -41,9 +59,10 @@ pub fn project_out(system: &ConstraintSystem, var: &PolyVar) -> ConstraintSystem
 
 /// Find the first equality that mentions `var`.
 fn find_equality_with_var(sys: &ConstraintSystem, var: &PolyVar) -> Option<usize> {
-    sys.equalities
-        .iter()
-        .position(|a| a.coefficient_of(var) != 0)
+    sys.equalities.iter().position(|a| {
+        let coeff = a.coefficient_of(var);
+        coeff == 1 || coeff == -1
+    })
 }
 
 /// Solve `equalities[idx]` for `var` and substitute into all other
@@ -51,22 +70,13 @@ fn find_equality_with_var(sys: &ConstraintSystem, var: &PolyVar) -> Option<usize
 fn eliminate_via_equality(sys: &mut ConstraintSystem, idx: usize, var: &PolyVar) {
     let eq = sys.equalities.remove(idx);
     let coeff = eq.coefficient_of(var);
-    debug_assert!(coeff != 0);
+    debug_assert!(coeff == 1 || coeff == -1);
 
     // eq: coeff * var + rest = 0
     // => var = -rest / coeff
-    // For integer exactness we need coeff to divide all other
-    // coefficients cleanly.  When it doesn't, we keep the
-    // substitution anyway (this is still sound for feasibility
-    // checking, though not exact for counting).
     let rest = eliminate_var_from_aff(&eq, var);
-    // replacement: -rest / coeff  (we scale instead of dividing)
-    // We substitute var -> (-rest) and then everything is multiplied
-    // by |coeff| to stay in integers.  This is equivalent to
-    // scaling all constraints by |coeff| first.
-    //
-    // Simple path: when |coeff| == 1 the substitution is exact.
-    let replacement = rest.scale(-1);
+    // replacement: -rest / coeff, exact for coeff in {+1, -1}.
+    let replacement = if coeff == 1 { rest.scale(-1) } else { rest };
 
     let substitute = |a: &mut Vec<crate::core::poly::domain::Aff>| {
         for expr in a.iter_mut() {
@@ -74,15 +84,7 @@ fn eliminate_via_equality(sys: &mut ConstraintSystem, idx: usize, var: &PolyVar)
             if c == 0 {
                 continue;
             }
-            if coeff == 1 || coeff == -1 {
-                // Exact: var = ±replacement
-                *expr = expr.substitute(var, &replacement.scale(1_i64 / coeff));
-            } else {
-                // Scale the whole expression by |coeff|, then substitute.
-                let scaled_expr = expr.scale(coeff.abs());
-                let sign = if coeff > 0 { -1 } else { 1 };
-                *expr = scaled_expr.substitute(var, &replacement.scale(sign));
-            }
+            *expr = expr.substitute(var, &replacement);
             expr.canonicalize();
         }
     };

@@ -6,11 +6,11 @@ mod poly_tests {
     use crate::core::llir::affine::{AffineExpr, Var};
     use crate::core::lower::lower;
     use crate::core::poly::analysis::dependence::analyze_kernel_poly;
-    use crate::core::poly::native::feasibility::{Feasibility, check_feasibility};
+    use crate::core::poly::native::feasibility::{check_feasibility, Feasibility};
     use crate::core::poly::native::fm;
     use crate::core::poly::{
-        Aff, ConstraintSystem, NativeDependenceAnalyzer, PolyVar, Relation, dim_to_aff,
-        extract_instances, project_out, shape_to_domain, strides_to_access,
+        dim_to_aff, extract_instances, project_out, shape_to_domain, shape_to_domain_checked,
+        strides_to_access, Aff, ConstraintSystem, NativeDependenceAnalyzer, PolyVar, Relation,
     };
     use crate::core::schedule::search::{ScheduleSearcher, TrivialHardware};
     use crate::core::traits::{DependenceAnalyzer, ScheduleTransform};
@@ -37,13 +37,17 @@ mod poly_tests {
     #[test]
     fn shape_to_domain_handles_affine_add_dim() {
         // Dim::Add(Const(4), Sym(1))  →  bound = 4 + N
-        let dim = Dim::Add(
-            Box::new(Dim::Const(4)),
-            Box::new(Dim::Sym(Symbol(1))),
-        );
+        let dim = Dim::Add(Box::new(Dim::Const(4)), Box::new(Dim::Sym(Symbol(1))));
         let domain = shape_to_domain(&[dim]);
         assert_eq!(domain.params, vec![Symbol(1)]);
         assert_eq!(domain.constraints.len(), 2);
+    }
+
+    #[test]
+    fn shape_to_domain_rejects_non_affine_dim() {
+        let dim = Dim::Div(Box::new(Dim::Const(8)), Box::new(Dim::Const(2)));
+        let err = shape_to_domain_checked(&[dim]).unwrap_err();
+        assert!(err.contains("non-affine dimension"));
     }
 
     // -----------------------------------------------------------------------
@@ -108,7 +112,9 @@ mod poly_tests {
             constant: 1,
             terms: vec![(1, PolyVar::Iter("j".into()))],
         };
-        let result = expr.substitute(&PolyVar::Iter("i".into()), &replacement).canonicalized();
+        let result = expr
+            .substitute(&PolyVar::Iter("i".into()), &replacement)
+            .canonicalized();
         assert_eq!(result.constant, 5);
         assert_eq!(result.terms, vec![(2, PolyVar::Iter("j".into()))]);
     }
@@ -181,10 +187,7 @@ mod poly_tests {
 
     #[test]
     fn dim_to_aff_rejects_sym_times_sym() {
-        let dim = Dim::Mul(
-            Box::new(Dim::Sym(Symbol(0))),
-            Box::new(Dim::Sym(Symbol(1))),
-        );
+        let dim = Dim::Mul(Box::new(Dim::Sym(Symbol(0))), Box::new(Dim::Sym(Symbol(1))));
         assert!(dim_to_aff(&dim).is_none());
     }
 
@@ -227,7 +230,9 @@ mod poly_tests {
         // 2*i + 3 → subst i = j+1 → 2*j + 5
         let expr = AffineExpr::constant(3).with_term(2, Var::Loop("i".into()));
         let repl = AffineExpr::constant(1).with_term(1, Var::Loop("j".into()));
-        let result = expr.substitute(&Var::Loop("i".into()), &repl).canonicalized();
+        let result = expr
+            .substitute(&Var::Loop("i".into()), &repl)
+            .canonicalized();
         assert_eq!(result.constant, 5);
         assert_eq!(result.terms, vec![(2, Var::Loop("j".into()))]);
     }
@@ -245,6 +250,87 @@ mod poly_tests {
     // -----------------------------------------------------------------------
     // Native analyzer (existing)
     // -----------------------------------------------------------------------
+
+    #[test]
+    fn access_dependence_emits_real_constraints_for_same_cell() -> Result<()> {
+        use crate::core::llir::loop_nest::{Loop, LoopAnnotations, LoopKind};
+        use crate::core::llir::memory::AccessKind;
+
+        let loops = vec![Loop {
+            var: "i0".into(),
+            lower: AffineExpr::constant(0),
+            upper: AffineExpr::constant(8),
+            step: 1,
+            kind: LoopKind::Sequential,
+            annotations: LoopAnnotations::default(),
+        }];
+
+        let write = crate::core::llir::MemoryAccess {
+            buffer: BufferId(0),
+            indices: vec![AffineExpr::constant(0).with_term(1, Var::Loop("i0".into()))],
+            access_kind: AccessKind::Write,
+        };
+        let read = crate::core::llir::MemoryAccess {
+            buffer: BufferId(0),
+            indices: vec![AffineExpr::constant(0).with_term(1, Var::Loop("i0".into()))],
+            access_kind: AccessKind::Read,
+        };
+
+        let analyzer = NativeDependenceAnalyzer;
+        let rel = analyzer
+            .access_dependence(&write, &read, &loops)?
+            .expect("expected dependence relation");
+
+        assert!(
+            !rel.constraints.is_empty(),
+            "relation should not be placeholder-empty"
+        );
+        assert!(
+            rel.constraints
+                .iter()
+                .any(|c| c.kind == crate::core::llir::ConstraintKind::Eq),
+            "relation should include memory equality"
+        );
+        assert!(
+            rel.constraints
+                .iter()
+                .any(|c| c.kind == crate::core::llir::ConstraintKind::Ge),
+            "relation should include ordering/domain inequalities"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn access_dependence_returns_none_for_reverse_time_shift() -> Result<()> {
+        use crate::core::llir::loop_nest::{Loop, LoopAnnotations, LoopKind};
+        use crate::core::llir::memory::AccessKind;
+
+        let loops = vec![Loop {
+            var: "i0".into(),
+            lower: AffineExpr::constant(0),
+            upper: AffineExpr::constant(8),
+            step: 1,
+            kind: LoopKind::Sequential,
+            annotations: LoopAnnotations::default(),
+        }];
+
+        // write A[i0], read A[i0 + 1] => requires sink before source for same cell.
+        let write = crate::core::llir::MemoryAccess {
+            buffer: BufferId(0),
+            indices: vec![AffineExpr::constant(0).with_term(1, Var::Loop("i0".into()))],
+            access_kind: AccessKind::Write,
+        };
+        let read = crate::core::llir::MemoryAccess {
+            buffer: BufferId(0),
+            indices: vec![AffineExpr::constant(1).with_term(1, Var::Loop("i0".into()))],
+            access_kind: AccessKind::Read,
+        };
+
+        let analyzer = NativeDependenceAnalyzer;
+        let rel = analyzer.access_dependence(&write, &read, &loops)?;
+        assert!(rel.is_none());
+        Ok(())
+    }
 
     #[test]
     fn native_analyzer_finds_simple_dependence() -> Result<()> {
@@ -325,7 +411,10 @@ mod poly_tests {
 
         // Bound should be symbolic (not constant 1).
         let ub = &kernel.loop_nest.loops[0].upper;
-        assert!(ub.as_const_value().is_none(), "symbolic dim should not collapse to constant");
+        assert!(
+            ub.as_const_value().is_none(),
+            "symbolic dim should not collapse to constant"
+        );
         assert_eq!(ub.coefficient_of(&Var::Param(sym)), 1);
         Ok(())
     }
@@ -384,7 +473,11 @@ mod poly_tests {
         let kernel = llir.kernels.last().unwrap();
 
         let instances = extract_instances(kernel);
-        assert_eq!(instances.len(), 1, "elementwise add should produce one statement");
+        assert_eq!(
+            instances.len(),
+            1,
+            "elementwise add should produce one statement"
+        );
 
         let si = &instances[0];
         assert_eq!(si.stmt_id, 0);
@@ -410,7 +503,10 @@ mod poly_tests {
         let kernel = llir.kernels.last().unwrap();
 
         let instances = extract_instances(kernel);
-        assert!(!instances.is_empty(), "reduction kernel should produce statements");
+        assert!(
+            !instances.is_empty(),
+            "reduction kernel should produce statements"
+        );
 
         // At least one statement should have both reads and writes.
         let has_rw = instances
@@ -513,7 +609,10 @@ mod poly_tests {
 
         // Should have: 2 source bounds + 2 sink bounds = 4 inequalities,
         // 1 memory-equality, 1 execution-order inequality.
-        assert!(!rel.system.equalities.is_empty(), "should have memory-equality");
+        assert!(
+            !rel.system.equalities.is_empty(),
+            "should have memory-equality"
+        );
         assert!(
             rel.system.inequalities.len() >= 5,
             "should have domain bounds + execution order"
@@ -536,6 +635,23 @@ mod poly_tests {
 
         // Two memory-equality constraints (one per dimension).
         assert_eq!(rel.system.equalities.len(), 2);
+    }
+
+    #[test]
+    fn relation_order_slice_enforces_prefix_equalities() {
+        use crate::core::poly::AccessMap;
+
+        let domain = shape_to_domain(&[Dim::Const(4), Dim::Const(8)]);
+        let access = AccessMap {
+            buffer: BufferId(0),
+            domain_iters: vec!["i0".into(), "i1".into()],
+            mapping: vec![Aff::iter_var("i0"), Aff::iter_var("i1")],
+        };
+
+        let rel = Relation::build_dependence_with_order_dim(&domain, &domain, &access, &access, 1);
+
+        // order_dim=1 adds equality on dim 0 and inequality on dim 1.
+        assert!(rel.system.equalities.len() >= 3);
     }
 
     #[test]
@@ -592,6 +708,26 @@ mod poly_tests {
         assert_eq!(result.inequalities.len(), 1);
     }
 
+    #[test]
+    fn project_out_non_unit_equality_does_not_drop_var() {
+        // 2*x + y = 0 cannot be eliminated exactly in integer space.
+        let mut sys = ConstraintSystem::new();
+        sys.add_var(PolyVar::Iter("x".into()));
+        sys.add_var(PolyVar::Iter("y".into()));
+        sys.add_equality(Aff {
+            constant: 0,
+            terms: vec![
+                (2, PolyVar::Iter("x".into())),
+                (1, PolyVar::Iter("y".into())),
+            ],
+        });
+        sys.add_inequality(Aff::iter_var("x"));
+
+        let result = project_out(&sys, &PolyVar::Iter("x".into()));
+        assert!(result.vars.contains(&PolyVar::Iter("x".into())));
+        assert_eq!(result.equalities.len(), 1);
+    }
+
     // -----------------------------------------------------------------------
     // Step 5: Native Fourier-Motzkin projection
     // -----------------------------------------------------------------------
@@ -612,7 +748,10 @@ mod poly_tests {
         let result = fm::fourier_motzkin_eliminate(&sys, &PolyVar::Iter("x".into()));
         let ineqs = result.expect("should not blow up");
         // Only generated constraint is 5 >= 0, which cleanup drops as trivially true.
-        assert!(ineqs.is_empty(), "box projection should produce no non-trivial constraints");
+        assert!(
+            ineqs.is_empty(),
+            "box projection should produce no non-trivial constraints"
+        );
     }
 
     #[test]
@@ -666,7 +805,11 @@ mod poly_tests {
         // Combined: -2 >= 0, which is kept (it's a contradiction, not trivially true).
         assert_eq!(ineqs.len(), 1);
         assert!(ineqs[0].terms.is_empty());
-        assert!(ineqs[0].constant < 0, "should be infeasible: {} < 0", ineqs[0].constant);
+        assert!(
+            ineqs[0].constant < 0,
+            "should be infeasible: {} < 0",
+            ineqs[0].constant
+        );
     }
 
     #[test]
@@ -844,6 +987,44 @@ mod poly_tests {
     }
 
     #[test]
+    fn feasibility_symbolic_parameter_is_unknown() {
+        // N >= 0 with no iterator variables remains parameter-dependent.
+        // Proof-oriented checker should not claim Feasible.
+        let mut sys = ConstraintSystem::new();
+        let n = Symbol(99);
+        sys.add_var(PolyVar::Param(n));
+        sys.add_inequality(Aff {
+            constant: 0,
+            terms: vec![(1, PolyVar::Param(n))],
+        });
+
+        assert_eq!(check_feasibility(&sys), Feasibility::Unknown);
+    }
+
+    #[test]
+    fn feasibility_non_unit_equality_with_bounds_is_unknown() {
+        // 2*x + y = 0, x >= 0, y >= 1 has no solution with x integer and y odd,
+        // but exact elimination is unavailable here; checker must not claim Feasible.
+        let mut sys = ConstraintSystem::new();
+        sys.add_var(PolyVar::Iter("x".into()));
+        sys.add_var(PolyVar::Iter("y".into()));
+        sys.add_equality(Aff {
+            constant: 0,
+            terms: vec![
+                (2, PolyVar::Iter("x".into())),
+                (1, PolyVar::Iter("y".into())),
+            ],
+        });
+        sys.add_inequality(Aff::iter_var("x"));
+        sys.add_inequality(Aff {
+            constant: -1,
+            terms: vec![(1, PolyVar::Iter("y".into()))],
+        });
+
+        assert_eq!(check_feasibility(&sys), Feasibility::Unknown);
+    }
+
+    #[test]
     fn feasibility_constraint_system_is_empty_method() {
         // Use the ConstraintSystem::is_empty convenience method.
         let mut sys = ConstraintSystem::new();
@@ -898,10 +1079,15 @@ mod poly_tests {
         let kernel = llir.kernels.last().unwrap();
 
         let deps = analyze_kernel_poly(kernel);
-        assert!(!deps.is_empty(), "elementwise kernel should have dependences");
+        assert!(
+            !deps.is_empty(),
+            "elementwise kernel should have dependences"
+        );
 
         // All dependences should be RAW.
-        assert!(deps.iter().all(|d| d.kind == crate::core::llir::DepKind::Raw));
+        assert!(deps
+            .iter()
+            .all(|d| d.kind == crate::core::llir::DepKind::Raw));
         Ok(())
     }
 
@@ -1188,10 +1374,7 @@ mod poly_tests {
 
         let analyzer = NativeDependenceAnalyzer;
         let result = lower(&g, &decision, &analyzer);
-        assert!(
-            result.is_err(),
-            "Vectorize on reduce loop should fail"
-        );
+        assert!(result.is_err(), "Vectorize on reduce loop should fail");
         Ok(())
     }
 
@@ -1373,9 +1556,7 @@ mod poly_tests {
         };
         let opts = opt_candidates(&ctx);
 
-        let vec_on_0 = opts
-            .iter()
-            .any(|o| o.op == OptOp::Vectorize && o.axis == 0);
+        let vec_on_0 = opts.iter().any(|o| o.op == OptOp::Vectorize && o.axis == 0);
         assert!(
             !vec_on_0,
             "Vectorize should be excluded on carried-dep axis"
@@ -1398,6 +1579,9 @@ mod poly_tests {
         let opts = opt_candidates(&ctx);
 
         let tile_on_0 = opts.iter().any(|o| o.op == OptOp::Tile && o.axis == 0);
-        assert!(tile_on_0, "Tile should still be allowed on carried-dep axis");
+        assert!(
+            tile_on_0,
+            "Tile should still be allowed on carried-dep axis"
+        );
     }
 }

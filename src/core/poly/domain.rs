@@ -214,6 +214,10 @@ pub fn dim_to_aff(dim: &Dim) -> Option<Aff> {
 // ---------------------------------------------------------------------------
 
 pub fn shape_to_domain(shape: &[Dim]) -> Domain {
+    shape_to_domain_checked(shape).expect("shape_to_domain requires affine dimensions")
+}
+
+pub fn shape_to_domain_checked(shape: &[Dim]) -> Result<Domain, String> {
     let mut iters = Vec::with_capacity(shape.len());
     let mut params = Vec::new();
     let mut constraints = Vec::with_capacity(shape.len() * 2);
@@ -242,17 +246,15 @@ pub fn shape_to_domain(shape: &[Dim]) -> Domain {
             }
             constraints.push(Constraint::Ineq(ub));
         } else {
-            // Non-affine: collapse to iter <= 0 (conservative single-iteration).
-            constraints.push(Constraint::Ineq(Aff {
-                constant: -1,
-                terms: vec![(-1, PolyVar::Iter(iter))],
-            }));
+            return Err(format!(
+                "non-affine dimension at axis {i} is not supported by native poly domain"
+            ));
         }
     }
 
-    Domain {
+    Ok(Domain {
         iters,
         params,
         constraints,
-    }
+    })
 }

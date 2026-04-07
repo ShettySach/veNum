@@ -173,6 +173,27 @@ impl Relation {
         write_access: &AccessMap,
         read_access: &AccessMap,
     ) -> Self {
+        Self::build_dependence_with_order_dim(
+            source_domain,
+            sink_domain,
+            write_access,
+            read_access,
+            0,
+        )
+    }
+
+    /// Build one lexicographic-order slice of the dependence relation.
+    ///
+    /// `order_dim` selects the first loop dimension where source and sink may
+    /// differ: all earlier shared dimensions are constrained equal, and this
+    /// dimension is constrained `t_dim - s_dim >= 0`.
+    pub fn build_dependence_with_order_dim(
+        source_domain: &Domain,
+        sink_domain: &Domain,
+        write_access: &AccessMap,
+        read_access: &AccessMap,
+        order_dim: usize,
+    ) -> Self {
         let mut system = ConstraintSystem::new();
 
         // 1. Source domain constraints with s_ prefix.
@@ -198,16 +219,18 @@ impl Relation {
             system.add_equality(w.sub(&r));
         }
 
-        // 4. Execution-order: for the original sequential schedule the
-        //    source instance executes before the sink if the source
-        //    iteration vector is lexicographically <= the sink vector.
-        //    A simple conservative encoding: for the outermost shared
-        //    iterator, require t_i - s_i >= 0.
-        if let Some(first_iter) = source_domain.iters.first()
-            && sink_domain.iters.contains(first_iter)
-        {
-            let s_var = Aff::iter_var(format!("{}{first_iter}", Self::SOURCE_PREFIX));
-            let t_var = Aff::iter_var(format!("{}{first_iter}", Self::SINK_PREFIX));
+        // 4. Execution-order slice for lexicographic source-before-sink.
+        let shared_iters = shared_iter_names(&source_domain.iters, &sink_domain.iters);
+        if order_dim < shared_iters.len() {
+            for iter in shared_iters.iter().take(order_dim) {
+                let s_var = Aff::iter_var(format!("{}{iter}", Self::SOURCE_PREFIX));
+                let t_var = Aff::iter_var(format!("{}{iter}", Self::SINK_PREFIX));
+                system.add_equality(t_var.sub(&s_var));
+            }
+
+            let dim = shared_iters[order_dim];
+            let s_var = Aff::iter_var(format!("{}{dim}", Self::SOURCE_PREFIX));
+            let t_var = Aff::iter_var(format!("{}{dim}", Self::SINK_PREFIX));
             system.add_inequality(t_var.sub(&s_var));
         }
 
@@ -236,6 +259,13 @@ impl Relation {
     pub fn sink_var(&self, iter: &str) -> PolyVar {
         PolyVar::Iter(format!("{}{iter}", Self::SINK_PREFIX))
     }
+}
+
+pub fn shared_iter_names<'a>(source_iters: &'a [String], sink_iters: &[String]) -> Vec<&'a String> {
+    source_iters
+        .iter()
+        .filter(|i| sink_iters.contains(i))
+        .collect()
 }
 
 // ---------------------------------------------------------------------------

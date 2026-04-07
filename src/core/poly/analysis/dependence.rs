@@ -3,11 +3,11 @@ use crate::core::llir::dependence::{
 };
 use crate::core::llir::program::Kernel;
 
-use crate::core::poly::access_map::AccessMap;
-use crate::core::poly::analysis::extract::{StatementInstance, extract_instances};
 use crate::core::llir::affine::AffineExpr;
+use crate::core::poly::access_map::AccessMap;
+use crate::core::poly::analysis::extract::{extract_instances, StatementInstance};
 use crate::core::poly::native::distance::compute_distance;
-use crate::core::poly::sets::relation::Relation;
+use crate::core::poly::sets::relation::{shared_iter_names, Relation};
 
 /// Analyze a kernel for data dependences using the polyhedral model.
 ///
@@ -35,8 +35,7 @@ pub fn analyze_kernel_poly(kernel: &Kernel) -> Vec<Dependence> {
                     if w.mapping.len() != r.mapping.len() {
                         continue;
                     }
-                    if let Some(dep) =
-                        build_dependence(si, sj, w, r, si_idx, sj_idx, DepKind::Raw)
+                    if let Some(dep) = build_dependence(si, sj, w, r, si_idx, sj_idx, DepKind::Raw)
                     {
                         deps.push(dep);
                     }
@@ -77,20 +76,30 @@ fn build_dependence(
     to_id: usize,
     kind: DepKind,
 ) -> Option<Dependence> {
-    let rel = Relation::build_dependence(
-        &source.domain,
-        &sink.domain,
-        write_access,
-        read_access,
-    );
-
-    // Check feasibility — if the relation is empty, no dependence.
-    if rel.system.is_empty() {
+    let shared = shared_iter_names(&source.domain.iters, &sink.domain.iters);
+    if shared.is_empty() {
         return None;
     }
 
+    let mut feasible_rel: Option<Relation> = None;
+    for order_dim in 0..shared.len() {
+        let rel = Relation::build_dependence_with_order_dim(
+            &source.domain,
+            &sink.domain,
+            write_access,
+            read_access,
+            order_dim,
+        );
+        if !rel.system.is_empty() {
+            feasible_rel = Some(rel);
+            break;
+        }
+    }
+
+    let rel = feasible_rel?;
+
     // Compute distance/direction.
-    let (distance, directions) = compute_distance(
+    let (distance, _directions) = compute_distance(
         &rel.system,
         &rel.source_iters,
         &rel.sink_iters,
