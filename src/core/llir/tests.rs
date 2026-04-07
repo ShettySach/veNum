@@ -44,11 +44,12 @@ mod llir_tests {
         let decision = ScheduleSearcher::new(TrivialHardware).search_best(&g)?.0;
         let llir = lower(&g, &decision, &NoOpDependenceAnalyzer)?;
         let k = llir.kernels.last().unwrap();
-        assert!(k
-            .loop_nest
-            .loops
-            .iter()
-            .any(|lp| matches!(lp.kind, LoopKind::Reduce { .. })));
+        assert!(
+            k.loop_nest
+                .loops
+                .iter()
+                .any(|lp| matches!(lp.kind, LoopKind::Reduce { .. }))
+        );
         Ok(())
     }
 }

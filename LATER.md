@@ -1,4 +1,3 @@
 - Interning symbolic shape strings and other such micro optimizations.
 - Using a flat arena-based representation for Dim rather than Box
 - Decompose Sqrt, Recip, Max, Min ?
-
