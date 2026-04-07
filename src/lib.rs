@@ -17,10 +17,11 @@ pub use core::compile::{SearchConfig, compile};
 pub use core::cost::{CpuHardwareModel, roofline_estimate};
 pub use core::cpu::{Buffer, CpuCodeGenerator, CpuModule};
 pub use core::dep::NoOpDependenceAnalyzer;
-pub use core::hlir::{BufferId, DType, Dim, HLIRGraph, NodeId, Scalar, Symbol};
+pub use core::hlir::{BufferId, DType, Dim, HLIRGraph, NodeId, Op, ReduceOp, Scalar, Symbol, TensorType};
 pub use core::llir::{
     AffineConstraint, AffineExpr, ConstraintKind, DepKind, Dependence, DependenceRelation,
-    LLIRProgram, Loop, LoopKind, LoopNest, MemoryAccess, Stmt, Var,
+    AbstractVectorOp, AccessKind, BinaryOp, Expr, Kernel, KernelId, LLIRProgram, Loop, LoopKind,
+    LoopNest, MemoryAccess, Stmt, UnaryOp, Var,
 };
 pub use core::poly::{
     AccessMap, Aff, Constraint, ConstraintSystem, Domain, NativeDependenceAnalyzer, PolyVar,

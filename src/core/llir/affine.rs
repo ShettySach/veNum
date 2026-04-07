@@ -48,7 +48,11 @@ impl AffineExpr {
     pub fn scale(&self, factor: i64) -> Self {
         Self {
             constant: self.constant * factor,
-            terms: self.terms.iter().map(|(c, v)| (c * factor, v.clone())).collect(),
+            terms: self
+                .terms
+                .iter()
+                .map(|(c, v)| (c * factor, v.clone()))
+                .collect(),
         }
     }
 

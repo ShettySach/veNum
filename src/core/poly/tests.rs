@@ -547,6 +547,182 @@ mod poly_tests {
         Ok(())
     }
 
+    #[test]
+    fn extract_if_affine_guard_refines_then_and_else_domains() {
+        use crate::core::llir::loop_nest::{Loop, LoopAnnotations, LoopKind, LoopNest};
+        use crate::core::llir::memory::AccessKind;
+        use crate::core::llir::stmt::{BinaryOp, Expr, Stmt};
+
+        let loop_i = Loop {
+            var: "i0".into(),
+            lower: AffineExpr::constant(0),
+            upper: AffineExpr::constant(16),
+            step: 1,
+            kind: LoopKind::Sequential,
+            annotations: LoopAnnotations::default(),
+        };
+
+        let cond = Expr::Binary {
+            op: BinaryOp::Lt,
+            lhs: Box::new(Expr::Literal(crate::core::hlir::Scalar::I32(0))),
+            rhs: Box::new(Expr::Literal(crate::core::hlir::Scalar::I32(8))),
+        };
+
+        let then_stmt = Stmt::Assign {
+            dst: crate::core::llir::MemoryAccess {
+                buffer: BufferId(0),
+                indices: vec![AffineExpr::constant(0).with_term(1, Var::Loop("i0".into()))],
+                access_kind: AccessKind::Write,
+            },
+            src: Expr::Load(crate::core::llir::MemoryAccess {
+                buffer: BufferId(1),
+                indices: vec![AffineExpr::constant(0).with_term(1, Var::Loop("i0".into()))],
+                access_kind: AccessKind::Read,
+            }),
+        };
+        let else_stmt = Stmt::Assign {
+            dst: crate::core::llir::MemoryAccess {
+                buffer: BufferId(0),
+                indices: vec![AffineExpr::constant(0).with_term(1, Var::Loop("i0".into()))],
+                access_kind: AccessKind::Write,
+            },
+            src: Expr::Load(crate::core::llir::MemoryAccess {
+                buffer: BufferId(2),
+                indices: vec![AffineExpr::constant(0).with_term(1, Var::Loop("i0".into()))],
+                access_kind: AccessKind::Read,
+            }),
+        };
+
+        let kernel = crate::core::llir::Kernel {
+            id: crate::core::llir::program::KernelId(0),
+            name: "if_guard_test".into(),
+            root: crate::core::hlir::NodeId(0),
+            op: Op::Add(crate::core::hlir::NodeId(0), crate::core::hlir::NodeId(1)),
+            ty: TensorType::contiguous(vec![Dim::Const(16)], DType::F32),
+            loop_nest: LoopNest {
+                loops: vec![loop_i],
+                body: vec![Stmt::If {
+                    cond,
+                    then_body: vec![then_stmt],
+                    else_body: vec![else_stmt],
+                }],
+            },
+            allocs: vec![],
+        };
+
+        let instances = extract_instances(&kernel);
+        assert_eq!(instances.len(), 2);
+
+        let has_then_guard = instances.iter().any(|si| {
+            si.domain.constraints.iter().any(|c| {
+                matches!(c, crate::core::poly::Constraint::Ineq(a)
+                    if a.constant == 7 && a.terms.is_empty())
+            })
+        });
+        let has_else_guard = instances.iter().any(|si| {
+            si.domain.constraints.iter().any(|c| {
+                matches!(c, crate::core::poly::Constraint::Ineq(a)
+                    if a.constant == -8 && a.terms.is_empty())
+            })
+        });
+
+        assert!(has_then_guard, "then domain should include i0 < 8 guard");
+        assert!(has_else_guard, "else domain should include i0 >= 8 guard");
+    }
+
+    #[test]
+    fn extract_vector_gather_records_base_buffer_read() {
+        use crate::core::llir::loop_nest::{Loop, LoopAnnotations, LoopKind, LoopNest};
+        use crate::core::llir::memory::AccessKind;
+        use crate::core::llir::stmt::{AbstractVectorOp, Expr, Stmt};
+
+        let kernel = crate::core::llir::Kernel {
+            id: crate::core::llir::program::KernelId(0),
+            name: "gather_extract_test".into(),
+            root: crate::core::hlir::NodeId(0),
+            op: Op::Add(crate::core::hlir::NodeId(0), crate::core::hlir::NodeId(1)),
+            ty: TensorType::contiguous(vec![Dim::Const(16)], DType::F32),
+            loop_nest: LoopNest {
+                loops: vec![Loop {
+                    var: "i0".into(),
+                    lower: AffineExpr::constant(0),
+                    upper: AffineExpr::constant(16),
+                    step: 1,
+                    kind: LoopKind::Sequential,
+                    annotations: LoopAnnotations::default(),
+                }],
+                body: vec![Stmt::Assign {
+                    dst: crate::core::llir::MemoryAccess {
+                        buffer: BufferId(0),
+                        indices: vec![AffineExpr::constant(0).with_term(1, Var::Loop("i0".into()))],
+                        access_kind: AccessKind::Write,
+                    },
+                    src: Expr::AbstractVector(AbstractVectorOp::Gather {
+                        base: BufferId(7),
+                        indices: Box::new(Expr::Literal(crate::core::hlir::Scalar::I32(3))),
+                        width: 4,
+                    }),
+                }],
+            },
+            allocs: vec![],
+        };
+
+        let instances = extract_instances(&kernel);
+        assert_eq!(instances.len(), 1);
+        let si = &instances[0];
+        assert!(
+            si.reads.iter().any(|r| r.buffer == BufferId(7)),
+            "gather base buffer must be captured as a read access"
+        );
+    }
+
+    #[test]
+    fn extract_vector_scatter_records_base_buffer_write() {
+        use crate::core::llir::loop_nest::{Loop, LoopAnnotations, LoopKind, LoopNest};
+        use crate::core::llir::memory::AccessKind;
+        use crate::core::llir::stmt::{AbstractVectorOp, Expr, Stmt};
+
+        let kernel = crate::core::llir::Kernel {
+            id: crate::core::llir::program::KernelId(0),
+            name: "scatter_extract_test".into(),
+            root: crate::core::hlir::NodeId(0),
+            op: Op::Add(crate::core::hlir::NodeId(0), crate::core::hlir::NodeId(1)),
+            ty: TensorType::contiguous(vec![Dim::Const(16)], DType::F32),
+            loop_nest: LoopNest {
+                loops: vec![Loop {
+                    var: "i0".into(),
+                    lower: AffineExpr::constant(0),
+                    upper: AffineExpr::constant(16),
+                    step: 1,
+                    kind: LoopKind::Sequential,
+                    annotations: LoopAnnotations::default(),
+                }],
+                body: vec![Stmt::Assign {
+                    dst: crate::core::llir::MemoryAccess {
+                        buffer: BufferId(0),
+                        indices: vec![AffineExpr::constant(0).with_term(1, Var::Loop("i0".into()))],
+                        access_kind: AccessKind::Write,
+                    },
+                    src: Expr::AbstractVector(AbstractVectorOp::Scatter {
+                        base: BufferId(9),
+                        indices: Box::new(Expr::Literal(crate::core::hlir::Scalar::I32(2))),
+                        value: Box::new(Expr::Literal(crate::core::hlir::Scalar::I32(1))),
+                        width: 4,
+                    }),
+                }],
+            },
+            allocs: vec![],
+        };
+
+        let instances = extract_instances(&kernel);
+        assert_eq!(instances.len(), 1);
+        let si = &instances[0];
+        assert!(
+            si.writes.iter().any(|w| w.buffer == BufferId(9)),
+            "scatter base buffer must be captured as a write access"
+        );
+    }
+
     // -----------------------------------------------------------------------
     // Step 4: Relation and set operations
     // -----------------------------------------------------------------------
