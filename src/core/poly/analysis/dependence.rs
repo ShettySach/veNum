@@ -5,9 +5,9 @@ use crate::core::llir::program::Kernel;
 
 use crate::core::llir::affine::AffineExpr;
 use crate::core::poly::access_map::AccessMap;
-use crate::core::poly::analysis::extract::{extract_instances, StatementInstance};
+use crate::core::poly::analysis::extract::{StatementInstance, extract_instances};
 use crate::core::poly::native::distance::compute_distance;
-use crate::core::poly::sets::relation::{shared_iter_names, Relation};
+use crate::core::poly::sets::relation::{Relation, shared_iter_names};
 
 /// Analyze a kernel for data dependences using the polyhedral model.
 ///

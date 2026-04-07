@@ -1,3 +1,3 @@
-___veNum___
+___venum___
 
-- Stands for vectorized _N_-dimensional numericals
+- Stands for vectorized N-dimensional numericals

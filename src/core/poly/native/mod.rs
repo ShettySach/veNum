@@ -4,9 +4,9 @@ pub mod fm;
 
 use anyhow::Result;
 
+use super::access_map::memory_access_to_access_map;
 use super::analysis::dependence::analyze_kernel_poly;
 use super::analysis::legality;
-use super::access_map::memory_access_to_access_map;
 use super::domain::{Aff, Constraint, Domain, IterName};
 use super::sets::Relation;
 
@@ -71,11 +71,7 @@ impl DependenceAnalyzer for NativeDependenceAnalyzer {
         let mut feasible_relation = None;
         for order_dim in 0..loop_vars.len() {
             let rel = Relation::build_dependence_with_order_dim(
-                &domain,
-                &domain,
-                &write_map,
-                &read_map,
-                order_dim,
+                &domain, &domain, &write_map, &read_map, order_dim,
             );
             if !rel.system.is_empty() {
                 feasible_relation = Some(rel);
@@ -133,7 +129,9 @@ fn loops_to_domain(loops: &[Loop]) -> Domain {
 
 fn collect_params(expr: &crate::core::llir::affine::AffineExpr, params: &mut Vec<Symbol>) {
     for (_, var) in &expr.terms {
-        if let crate::core::llir::affine::Var::Param(sym) = var && !params.contains(sym) {
+        if let crate::core::llir::affine::Var::Param(sym) = var
+            && !params.contains(sym)
+        {
             params.push(*sym);
         }
     }

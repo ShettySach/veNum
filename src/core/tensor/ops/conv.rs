@@ -2,7 +2,7 @@
 
 use crate::core::hlir::Dim;
 use crate::core::tensor::structure::Tensor;
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 
 impl Tensor {
     /// 2D convolution using the shifted-slice decomposition from the spec.

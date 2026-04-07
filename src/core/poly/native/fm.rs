@@ -20,10 +20,7 @@ const FM_MAX_GENERATED: usize = 256;
 ///
 /// Returns `None` if the number of generated constraints would exceed
 /// the safety limit (caller should fall back to conservative handling).
-pub fn fourier_motzkin_eliminate(
-    system: &ConstraintSystem,
-    var: &PolyVar,
-) -> Option<Vec<Aff>> {
+pub fn fourier_motzkin_eliminate(system: &ConstraintSystem, var: &PolyVar) -> Option<Vec<Aff>> {
     let mut lower_bounds: Vec<Aff> = Vec::new(); // coeff > 0: var has a lower bound
     let mut upper_bounds: Vec<Aff> = Vec::new(); // coeff < 0: var has an upper bound
     let mut unrelated: Vec<Aff> = Vec::new();

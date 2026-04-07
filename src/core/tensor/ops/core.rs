@@ -1,6 +1,6 @@
 //! Core tensor operations: binary_op and unary_op.
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 
 use crate::core::hlir::decompose;
 use crate::core::hlir::{Dim, NodeId, Op};

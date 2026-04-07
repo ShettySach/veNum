@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use crate::core::hlir::{BufferId, Dim};
 use crate::core::llir::MemoryAccess;

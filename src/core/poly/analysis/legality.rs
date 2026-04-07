@@ -32,9 +32,7 @@ pub fn can_interchange(deps: &[Dependence], outer: &str, inner: &str) -> bool {
                 let oi = d.relation.source_vars.iter().position(|v| v == outer);
                 let ii = d.relation.source_vars.iter().position(|v| v == inner);
                 match (oi, ii) {
-                    (Some(o), Some(i)) if o < dist.len() && i < dist.len() => {
-                        (dist[o], dist[i])
-                    }
+                    (Some(o), Some(i)) if o < dist.len() && i < dist.len() => (dist[o], dist[i]),
                     _ => return false, // can't find vars → conservative reject
                 }
             }
@@ -144,11 +142,7 @@ pub fn can_unroll(_deps: &[Dependence], _loop_var: &str) -> bool {
 fn is_carried_on(dep: &Dependence, loop_var: &str) -> bool {
     match &dep.distance {
         Some(dist) => {
-            let idx = dep
-                .relation
-                .source_vars
-                .iter()
-                .position(|v| v == loop_var);
+            let idx = dep.relation.source_vars.iter().position(|v| v == loop_var);
             match idx {
                 Some(i) if i < dist.len() => dist[i] > 0,
                 _ => true, // can't find → conservative

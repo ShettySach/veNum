@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use crate::core::compile::OutputRemapper;
-use crate::core::hlir::{op::CmpOp, BufferId, DType, Dim, NodeId, Op, Scalar, TensorType};
+use crate::core::hlir::{BufferId, DType, Dim, NodeId, Op, Scalar, TensorType, op::CmpOp};
 use crate::core::llir::LLIRProgram;
 use crate::core::traits::CodeGenerator;
 

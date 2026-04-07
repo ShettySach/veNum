@@ -74,6 +74,20 @@ pub fn egglog_algebraic(
         return (graph.clone(), identity_map);
     }
 
+    // Intern all root terms before saturation.
+    for (expr, _) in &extract_entries {
+        if egraph.eval_expr(expr).is_err() {
+            let identity_map = roots.iter().map(|&id| (id, id)).collect();
+            return (graph.clone(), identity_map);
+        }
+    }
+
+    if egraph.parse_and_run_program(None, "(run 10)").is_err() {
+        let identity_map = roots.iter().map(|&id| (id, id)).collect();
+        return (graph.clone(), identity_map);
+    }
+
+    // Re-evaluate roots after saturation so we extract canonical values.
     let mut extracted_inputs: Vec<(NodeId, egglog::ArcSort, egglog::Value)> =
         Vec::with_capacity(extract_entries.len());
     for (expr, src_id) in &extract_entries {
@@ -86,21 +100,25 @@ pub fn egglog_algebraic(
         }
     }
 
-    if egraph.parse_and_run_program(None, "(run 10)").is_err() {
-        let identity_map = roots.iter().map(|&id| (id, id)).collect();
-        return (graph.clone(), identity_map);
-    }
-
-    let extracted: Vec<(NodeId, egglog::TermDag, egglog::Term)> = match extracted_inputs
+    let extracted: Vec<(NodeId, egglog::TermDag, egglog::TermId)> = match extracted_inputs
         .into_iter()
         .map(|(src_id, sort, value)| {
-            egraph
-                .extract_value(&sort, value)
-                .map(|(termdag, term, _)| (src_id, termdag, term))
+            let extractor = egglog::extract::Extractor::compute_costs_from_rootsorts(
+                Some(vec![sort.clone()]),
+                &egraph,
+                egglog::extract::TreeAdditiveCostModel::default(),
+            );
+            let mut termdag = egglog::TermDag::default();
+            let out = extractor
+                .extract_best_with_sort(&egraph, &mut termdag, value, sort)
+                .map(|(_, term_id)| (src_id, termdag, term_id))
+                .ok_or(())
+                ;
+            out
         })
         .collect::<Result<_, _>>()
     {
-        Err(_) => {
+        Err(()) => {
             let identity_map = roots.iter().map(|&id| (id, id)).collect();
             return (graph.clone(), identity_map);
         }
@@ -108,11 +126,12 @@ pub fn egglog_algebraic(
     };
 
     let mut out = ctx.out;
-    let mut decode_memo: HashMap<egglog::TermId, NodeId> = HashMap::new();
     let mut decoded_map: HashMap<NodeId, NodeId> = HashMap::new();
 
     // Decode all extracted terms.
-    for (src_id, termdag, term) in &extracted {
+    for (src_id, termdag, term_id) in &extracted {
+        let term = termdag.get(*term_id);
+        let mut decode_memo: HashMap<egglog::TermId, NodeId> = HashMap::new();
         let new_id = decode_term(
             termdag,
             term,
@@ -138,6 +157,13 @@ pub fn egglog_algebraic(
                 .unwrap_or(*src_id)
         })
         .collect();
+
+    // Map barrier roots that were encoded directly as opaque leaves.
+    for barrier in &ctx.barriers {
+        if let Some(&built) = ctx.built_map.get(&barrier.src_id) {
+            decoded_map.entry(barrier.src_id).or_insert(built);
+        }
+    }
 
     // Merge with built_map for a full source→output mapping.
     for (&src, &out_id) in &ctx.built_map {
@@ -253,6 +279,26 @@ impl<'a> EgglogContext<'a> {
         id
     }
 
+    /// Materialize a source node subtree directly into `out` without e-graph rewrites.
+    /// This is used to represent non-algebraic values as opaque leaves in algebraic terms.
+    fn materialize_opaque_subtree(&mut self, id: NodeId) -> NodeId {
+        if let Some(&built) = self.built_map.get(&id) {
+            return built;
+        }
+
+        let node = self.src.node(id);
+        let remapped_inputs: Vec<NodeId> = node
+            .op
+            .inputs()
+            .iter()
+            .map(|inp| self.materialize_opaque_subtree(*inp))
+            .collect();
+        let new_op = super::optimize::remap_op_inputs(&node.op, &remapped_inputs);
+        let out_id = self.out.add_node(new_op, node.ty.clone());
+        self.built_map.insert(id, out_id);
+        out_id
+    }
+
     fn is_algebraic(op: &Op) -> bool {
         matches!(
             op,
@@ -321,17 +367,16 @@ impl<'a> EgglogContext<'a> {
         let term = match &node.op {
             // Constants: classify as Zero/One/Leaf
             Op::Const { value, .. } => {
-                let kind = LeafKind::Const {
+                let leaf_id = self.alloc_leaf(LeafKind::Const {
                     ty: node.ty.clone(),
                     value: value.clone(),
-                };
-                let leaf_id = self.alloc_leaf(kind);
+                });
                 if value.is_exact_zero() {
-                    expr_call("Zero", vec![expr_i64(leaf_id)])
+                    expr_call("KZero", vec![expr_i64(leaf_id)])
                 } else if value.is_exact_one() {
-                    expr_call("One", vec![expr_i64(leaf_id)])
+                    expr_call("KOne", vec![expr_i64(leaf_id)])
                 } else {
-                    expr_call("Leaf", vec![expr_i64(leaf_id)])
+                    expr_call("KConst", vec![expr_i64(leaf_id)])
                 }
             }
 
@@ -340,7 +385,7 @@ impl<'a> EgglogContext<'a> {
                 let out_id = self.out.load(*buffer, node.ty.clone());
                 self.built_map.insert(id, out_id);
                 let leaf_id = self.alloc_leaf(LeafKind::Node(out_id));
-                expr_call("Leaf", vec![expr_i64(leaf_id)])
+                expr_call("Var", vec![expr_i64(leaf_id)])
             }
 
             // Algebraic unary ops
@@ -440,9 +485,11 @@ impl<'a> EgglogContext<'a> {
             // Barrier ops: don't create egglog terms. Process recursively.
             _ => {
                 self.encode_barrier(id);
-                // Return a dummy — this won't be used for extraction since
-                // barrier roots are handled separately.
-                expr_call("Leaf", vec![expr_i64(-1)])
+                // Also materialize an opaque leaf so algebraic parents can reference
+                // non-algebraic children safely.
+                let opaque = self.materialize_opaque_subtree(id);
+                let leaf_id = self.alloc_leaf(LeafKind::Node(opaque));
+                expr_call("Var", vec![expr_i64(leaf_id)])
             }
         };
 
@@ -536,7 +583,9 @@ fn decode_inner(
     memo: &mut HashMap<egglog::TermId, NodeId>,
 ) -> NodeId {
     match term {
-        egglog::Term::App(ctor, args) if ctor == "Leaf" || ctor == "Zero" || ctor == "One" => {
+        egglog::Term::App(ctor, args)
+            if ctor == "Var" || ctor == "KConst" || ctor == "KZero" || ctor == "KOne" =>
+        {
             let leaf_id = decode_i64_arg(termdag, args, 0, "leaf id") as usize;
             match &leaves[leaf_id] {
                 LeafKind::Node(nid) => *nid,
@@ -544,6 +593,12 @@ fn decode_inner(
                     out.constant(value.clone(), ty.shape.clone(), ty.dtype)
                 }
             }
+        }
+        egglog::Term::App(ctor, args)
+            if ctor == "NConst" || ctor == "NInt" || ctor == "NAdd" || ctor == "NMul" =>
+        {
+            // Numeric coefficient terms are only valid as the second argument of EScale.
+            panic!("unexpected numeric term at Expr root: {ctor}")
         }
         egglog::Term::App(ctor, args) if ctor == "EAdd" => {
             let la = decode_term(
@@ -636,6 +691,29 @@ fn decode_inner(
                 memo,
             );
             out.binary(la, lb, Op::Min)
+        }
+        egglog::Term::App(ctor, args) if ctor == "EScale" => {
+            let base = decode_term(
+                termdag,
+                termdag.get(args[0]),
+                leaves,
+                shapes,
+                dtypes,
+                permutes,
+                out,
+                memo,
+            );
+            let coeff = decode_num(termdag, termdag.get(args[1]), leaves);
+            if coeff.is_exact_zero() {
+                let ty = out.ty(base).clone();
+                return out.constant(coeff, ty.shape, ty.dtype);
+            }
+            if coeff.is_exact_one() {
+                return base;
+            }
+            let ty = out.ty(base).clone();
+            let c = out.constant(Scalar::from_f64(coeff.to_f64(), ty.dtype), ty.shape, ty.dtype);
+            out.binary(base, c, Op::Mul)
         }
         egglog::Term::App(ctor, args) if ctor == "ENeg" => {
             let c = decode_term(
@@ -786,6 +864,33 @@ fn decode_i64_arg(
     match arg {
         egglog::Term::Lit(egglog::ast::Literal::Int(v)) => *v,
         _ => panic!("expected int literal for {what}, got {arg:?}"),
+    }
+}
+
+fn decode_num(termdag: &egglog::TermDag, term: &egglog::Term, leaves: &[LeafKind]) -> Scalar {
+    match term {
+        egglog::Term::App(ctor, args) if ctor == "NConst" => {
+            let leaf_id = decode_i64_arg(termdag, args, 0, "num const id") as usize;
+            match &leaves[leaf_id] {
+                LeafKind::Const { value, .. } => value.clone(),
+                LeafKind::Node(_) => panic!("NConst referenced non-const leaf"),
+            }
+        }
+        egglog::Term::App(ctor, args) if ctor == "NInt" => {
+            let v = decode_i64_arg(termdag, args, 0, "num int");
+            Scalar::I64(v)
+        }
+        egglog::Term::App(ctor, args) if ctor == "NAdd" => {
+            let a = decode_num(termdag, termdag.get(args[0]), leaves).to_f64();
+            let b = decode_num(termdag, termdag.get(args[1]), leaves).to_f64();
+            Scalar::F64(a + b)
+        }
+        egglog::Term::App(ctor, args) if ctor == "NMul" => {
+            let a = decode_num(termdag, termdag.get(args[0]), leaves).to_f64();
+            let b = decode_num(termdag, termdag.get(args[1]), leaves).to_f64();
+            Scalar::F64(a * b)
+        }
+        _ => panic!("unexpected numeric term in decode_num"),
     }
 }
 

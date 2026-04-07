@@ -11,7 +11,7 @@ cranelift-jit = "0.116"
 cranelift-module = "0.116"
 cranelift-native = "0.116"
 cranelift-codegen = "0.116"
-egglog = "1.0.0"
+egglog = "2.0.0"
 smallvec = "1"
 
 [dev-dependencies]

@@ -1,6 +1,6 @@
 //! Shape operations for tensors.
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 
 use crate::core::hlir::{Dim, Range};
 

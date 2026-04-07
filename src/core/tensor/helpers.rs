@@ -1,6 +1,6 @@
 //! Helper functions for tensor operations.
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use std::collections::HashSet;
 
 use crate::core::hlir::Dim;
@@ -108,11 +108,13 @@ mod tests {
             broadcast_batch(&[], &[Dim::Const(2), Dim::Const(3)]).unwrap(),
             vec![Dim::Const(2), Dim::Const(3)]
         );
-        assert!(broadcast_batch(
-            &[Dim::Const(2), Dim::Const(3)],
-            &[Dim::Const(3), Dim::Const(4)]
-        )
-        .is_err());
+        assert!(
+            broadcast_batch(
+                &[Dim::Const(2), Dim::Const(3)],
+                &[Dim::Const(3), Dim::Const(4)]
+            )
+            .is_err()
+        );
     }
 
     #[test]

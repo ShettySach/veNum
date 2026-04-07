@@ -1,8 +1,8 @@
 use crate::core::hlir::{BufferId, Scalar, Symbol};
+use crate::core::llir::MemoryAccess;
 use crate::core::llir::affine::{AffineExpr, Var};
 use crate::core::llir::loop_nest::Loop;
 use crate::core::llir::memory::AccessKind;
-use crate::core::llir::MemoryAccess;
 use crate::core::llir::program::Kernel;
 use crate::core::llir::stmt::{AbstractVectorOp, BinaryOp, Expr, Stmt};
 
@@ -247,7 +247,12 @@ fn collect_vector_accesses(
         }
         AbstractVectorOp::Gather { base, indices, .. } => {
             collect_expr_accesses(indices, loop_vars, reads, writes);
-            reads.push(vector_memory_access(*base, indices, loop_vars, AccessKind::Read));
+            reads.push(vector_memory_access(
+                *base,
+                indices,
+                loop_vars,
+                AccessKind::Read,
+            ));
         }
         AbstractVectorOp::Scatter {
             base,
@@ -257,7 +262,12 @@ fn collect_vector_accesses(
         } => {
             collect_expr_accesses(indices, loop_vars, reads, writes);
             collect_expr_accesses(value, loop_vars, reads, writes);
-            writes.push(vector_memory_access(*base, indices, loop_vars, AccessKind::Write));
+            writes.push(vector_memory_access(
+                *base,
+                indices,
+                loop_vars,
+                AccessKind::Write,
+            ));
         }
         AbstractVectorOp::VecBinary { lhs, rhs, .. } => {
             collect_expr_accesses(lhs, loop_vars, reads, writes);
@@ -403,7 +413,9 @@ fn collect_params_from_constraint(c: &Constraint, params: &mut Vec<Symbol>) {
         Constraint::Eq(a) | Constraint::Ineq(a) => a,
     };
     for (_, var) in &aff.terms {
-        if let super::super::domain::PolyVar::Param(sym) = var && !params.contains(sym) {
+        if let super::super::domain::PolyVar::Param(sym) = var
+            && !params.contains(sym)
+        {
             params.push(*sym);
         }
     }

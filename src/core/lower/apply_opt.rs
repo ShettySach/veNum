@@ -152,9 +152,9 @@ fn apply_group_reduce(nest: &mut LoopNest, opt: &Opt) -> Result<BufferAlloc> {
             var: "k".to_owned(),
             lower: AffineExpr::constant(0),
             upper: AffineExpr::constant(div_ceil_i64(
-            reduce_loop.upper.as_const_value().unwrap_or(1),
-            amt,
-        )),
+                reduce_loop.upper.as_const_value().unwrap_or(1),
+                amt,
+            )),
             step: 1,
             kind: LoopKind::Sequential,
             annotations: reduce_loop.annotations,

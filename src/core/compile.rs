@@ -1,9 +1,9 @@
 use anyhow::Result;
 
 use crate::core::hlir::{HLIRGraph, NodeId, canonicalize_with_roots_and_map};
+use crate::core::llir::LLIRProgram;
 use crate::core::llir::loop_nest::LoopKind;
 use crate::core::llir::program::Kernel;
-use crate::core::llir::LLIRProgram;
 use crate::core::lower::lower;
 use crate::core::schedule::{HardwareModel, ScheduleSearcher};
 use crate::core::traits::{CodeGenerator, DependenceAnalyzer};
@@ -102,7 +102,10 @@ fn try_interchange(kernel: &mut Kernel, dep: &impl DependenceAnalyzer) -> Result
     }
 
     // Apply the interchange.
-    kernel.loop_nest.loops.swap(candidate_idx, candidate_idx + 1);
+    kernel
+        .loop_nest
+        .loops
+        .swap(candidate_idx, candidate_idx + 1);
 
     Ok(())
 }

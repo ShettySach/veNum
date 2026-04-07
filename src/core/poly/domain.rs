@@ -44,7 +44,9 @@ fn intern_iter_name(name: &str) -> Arc<str> {
     let interner = ITER_NAME_INTERNER.get_or_init(|| RwLock::new(HashMap::new()));
 
     {
-        let map = interner.read().expect("iter-name interner read lock poisoned");
+        let map = interner
+            .read()
+            .expect("iter-name interner read lock poisoned");
         if let Some(interned) = map.get(name) {
             return Arc::clone(interned);
         }

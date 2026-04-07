@@ -79,18 +79,12 @@ fn build_base_kernel(
     }
 
     if let Op::Reduce {
-        axes,
-        op,
-        input,
-        ..
+        axes, op, input, ..
     } = &root_node.op
     {
         let input_shape = &hlir.node(*input).ty.shape;
         for (j, &axis) in axes.iter().enumerate() {
-            let reduce_dim = input_shape
-                .get(axis)
-                .cloned()
-                .unwrap_or(Dim::Const(1));
+            let reduce_dim = input_shape.get(axis).cloned().unwrap_or(Dim::Const(1));
             loops.push(Loop {
                 var: format!("r{j}"),
                 lower: AffineExpr::constant(0),

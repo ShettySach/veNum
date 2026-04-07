@@ -1,8 +1,8 @@
 //! Matrix multiplication for tensors.
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 
-use crate::core::hlir::{decompose, Dim};
+use crate::core::hlir::{Dim, decompose};
 use crate::core::tensor::helpers::broadcast_batch;
 use crate::core::tensor::structure::Tensor;
 

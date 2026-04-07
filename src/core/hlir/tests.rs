@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod hlir_tests {
     use crate::core::hlir::optimize::{canonicalize_hlir, canonicalize_with_roots};
-    use crate::core::hlir::{BufferId, DType, Dim, HLIRGraph, Op, ReduceOp, TensorType, decompose};
+    use crate::core::hlir::{
+        BufferId, DType, Dim, HLIRGraph, NodeId, Op, ReduceOp, Scalar, TensorType, decompose,
+    };
 
     #[test]
     fn hlir_graph_build_and_topo_iter() {
@@ -92,5 +94,28 @@ mod hlir_tests {
             .position(|(_, n)| matches!(n.op, Op::Reshape { .. }))
             .unwrap();
         assert!(add_idx < reshape_idx, "Add should come before Reshape");
+    }
+
+    #[test]
+    fn canonicalize_combines_linear_like_terms() {
+        let mut g = HLIRGraph::new();
+        let ty = TensorType::contiguous(vec![Dim::Const(5)], DType::F32);
+        let x = g.load(BufferId(0), ty);
+        let two = g.constant(Scalar::F32(2.0), vec![Dim::Const(5)], DType::F32);
+
+        let x2 = g.binary(x, two, Op::Mul);
+        let left = g.binary(x2, x, Op::Add);
+        let root = g.binary(left, left, Op::Add);
+
+        let opt = canonicalize_with_roots(&g, &[root]);
+        assert_eq!(
+            opt.len(),
+            3,
+            "expected Load + Const + Mul, got {}",
+            opt.len()
+        );
+
+        let root_id = NodeId(opt.len() - 1);
+        assert!(matches!(opt.node(root_id).op, Op::Mul(_, _)));
     }
 }

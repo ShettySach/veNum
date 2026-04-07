@@ -1,6 +1,6 @@
 use crate::core::poly::domain::{Aff, PolyVar};
-use crate::core::poly::sets::project::try_project_out_exact;
 use crate::core::poly::sets::ConstraintSystem;
+use crate::core::poly::sets::project::try_project_out_exact;
 
 use super::fm;
 
@@ -288,19 +288,11 @@ fn has_symbolic_params_in_constraints(sys: &ConstraintSystem) -> bool {
 /// Ceiling division: ⌈a / b⌉ for b > 0.
 fn ceil_div(a: i64, b: i64) -> i64 {
     debug_assert!(b > 0);
-    if a >= 0 {
-        (a + b - 1) / b
-    } else {
-        a / b
-    }
+    if a >= 0 { (a + b - 1) / b } else { a / b }
 }
 
 /// Floor division: ⌊a / b⌋ for b > 0.
 fn floor_div(a: i64, b: i64) -> i64 {
     debug_assert!(b > 0);
-    if a >= 0 {
-        a / b
-    } else {
-        (a - b + 1) / b
-    }
+    if a >= 0 { a / b } else { (a - b + 1) / b }
 }

@@ -6,12 +6,12 @@ mod poly_tests {
     use crate::core::llir::affine::{AffineExpr, Var};
     use crate::core::lower::lower;
     use crate::core::poly::analysis::dependence::analyze_kernel_poly;
+    use crate::core::poly::native::NativeDependenceAnalyzer;
     use crate::core::poly::native::feasibility::{Feasibility, check_feasibility};
     use crate::core::poly::native::fm;
     use crate::core::poly::{
-        Aff, ConstraintSystem, NativeDependenceAnalyzer, PolyVar, Relation, dim_to_aff,
-        extract_instances, project_out, shape_to_domain, shape_to_domain_checked,
-        strides_to_access,
+        Aff, ConstraintSystem, PolyVar, Relation, dim_to_aff, extract_instances, project_out,
+        shape_to_domain, shape_to_domain_checked, strides_to_access,
     };
     use crate::core::schedule::search::{ScheduleSearcher, TrivialHardware};
     use crate::core::traits::{DependenceAnalyzer, ScheduleTransform};
