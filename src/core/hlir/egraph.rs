@@ -15,6 +15,8 @@ use super::graph::HLIRGraph;
 use super::op::Op;
 use super::types::{DType, NodeId, Scalar, TensorType};
 
+type EggExpr = egglog::ast::Expr;
+
 /// Leaf metadata stored on the Rust side, keyed by integer id used in egglog.
 #[derive(Clone, Debug)]
 enum LeafKind {
@@ -42,7 +44,7 @@ pub fn egglog_algebraic(
     }
 
     // Collect all terms that need extraction: algebraic user roots + algebraic sub-roots for barriers.
-    let mut extract_entries: Vec<(String, NodeId)> = Vec::new();
+    let mut extract_entries: Vec<(EggExpr, NodeId)> = Vec::new();
 
     // User roots that are algebraic (have egglog terms).
     for &id in roots {
@@ -65,53 +67,63 @@ pub fn egglog_algebraic(
         return (out, remap);
     }
 
-    // Build the full egglog program.
-    let mut program = String::from(EGGLOG_SCHEMA);
-    for (i, (term, _)) in extract_entries.iter().enumerate() {
-        program.push_str(&format!("(let e{i} {term})\n"));
-    }
-    program.push_str("(run 10)\n");
-    for i in 0..extract_entries.len() {
-        program.push_str(&format!("(extract e{i})\n"));
-    }
-
     // Run egglog.
     let mut egraph = egglog::EGraph::default();
-    let outputs = match egraph.parse_and_run_program(None, &program) {
-        Ok(outputs) => outputs,
+    if egraph.parse_and_run_program(None, EGGLOG_SCHEMA).is_err() {
+        let identity_map = roots.iter().map(|&id| (id, id)).collect();
+        return (graph.clone(), identity_map);
+    }
+
+    let mut extracted_inputs: Vec<(NodeId, egglog::ArcSort, egglog::Value)> =
+        Vec::with_capacity(extract_entries.len());
+    for (expr, src_id) in &extract_entries {
+        match egraph.eval_expr(expr) {
+            Ok((sort, value)) => extracted_inputs.push((*src_id, sort, value)),
+            Err(_) => {
+                let identity_map = roots.iter().map(|&id| (id, id)).collect();
+                return (graph.clone(), identity_map);
+            }
+        }
+    }
+
+    if egraph.parse_and_run_program(None, "(run 10)").is_err() {
+        let identity_map = roots.iter().map(|&id| (id, id)).collect();
+        return (graph.clone(), identity_map);
+    }
+
+    let extracted: Vec<(NodeId, egglog::TermDag, egglog::Term)> = match extracted_inputs
+        .into_iter()
+        .map(|(src_id, sort, value)| {
+            egraph
+                .extract_value(&sort, value)
+                .map(|(termdag, term, _)| (src_id, termdag, term))
+        })
+        .collect::<Result<_, _>>()
+    {
         Err(_) => {
             let identity_map = roots.iter().map(|&id| (id, id)).collect();
             return (graph.clone(), identity_map);
         }
+        Ok(extracted) => extracted,
     };
 
-    let extracted: Vec<(egglog::TermDag, egglog::Term)> = outputs
-        .into_iter()
-        .filter_map(|o| match o {
-            egglog::CommandOutput::ExtractBest(termdag, _cost, term) => Some((termdag, term)),
-            _ => None,
-        })
-        .collect();
-
     let mut out = ctx.out;
-    let mut decode_memo: HashMap<String, NodeId> = HashMap::new();
+    let mut decode_memo: HashMap<egglog::TermId, NodeId> = HashMap::new();
     let mut decoded_map: HashMap<NodeId, NodeId> = HashMap::new();
 
     // Decode all extracted terms.
-    for (i, (_, src_id)) in extract_entries.iter().enumerate() {
-        if let Some((termdag, term)) = extracted.get(i) {
-            let term_str = termdag.to_string(term);
-            let new_id = decode_term(
-                &term_str,
-                &ctx.leaves,
-                &ctx.shape_meta,
-                &ctx.dtype_meta,
-                &ctx.permute_meta,
-                &mut out,
-                &mut decode_memo,
-            );
-            decoded_map.insert(*src_id, new_id);
-        }
+    for (src_id, termdag, term) in &extracted {
+        let new_id = decode_term(
+            termdag,
+            term,
+            &ctx.leaves,
+            &ctx.shape_meta,
+            &ctx.dtype_meta,
+            &ctx.permute_meta,
+            &mut out,
+            &mut decode_memo,
+        );
+        decoded_map.insert(*src_id, new_id);
     }
 
     // Build alg_decoded vector in the order of algebraic_roots.
@@ -162,8 +174,8 @@ struct BarrierInfo {
 struct EgglogContext<'a> {
     src: &'a HLIRGraph,
     out: HLIRGraph,
-    /// Maps source NodeId → egglog term string for algebraic nodes.
-    term_memo: HashMap<NodeId, String>,
+    /// Maps source NodeId → egglog expression for algebraic nodes.
+    term_memo: HashMap<NodeId, EggExpr>,
     /// Leaf metadata, keyed by the integer id used in egglog terms.
     leaves: Vec<LeafKind>,
     /// Shape metadata, keyed by integer id used in EReshape/EExpand terms.
@@ -179,7 +191,7 @@ struct EgglogContext<'a> {
     /// Dedup map for permute axes ids.
     permute_dedup: HashMap<Vec<usize>, i64>,
     /// Algebraic sub-roots that need egglog extraction (fed to barriers).
-    algebraic_roots: Vec<(String, NodeId)>,
+    algebraic_roots: Vec<(EggExpr, NodeId)>,
     /// Barrier nodes that need post-decode reconstruction.
     barriers: Vec<BarrierInfo>,
     /// Maps source NodeId → output NodeId for already-rebuilt barrier/leaf nodes.
@@ -300,7 +312,7 @@ impl<'a> EgglogContext<'a> {
 
     /// Encode an HLIR node as an egglog term string.
     /// Non-algebraic nodes are recorded as barriers for post-decode rebuild.
-    fn encode(&mut self, id: NodeId) -> String {
+    fn encode(&mut self, id: NodeId) -> EggExpr {
         if let Some(term) = self.term_memo.get(&id) {
             return term.clone();
         }
@@ -315,11 +327,11 @@ impl<'a> EgglogContext<'a> {
                 };
                 let leaf_id = self.alloc_leaf(kind);
                 if value.is_exact_zero() {
-                    format!("(Zero {leaf_id})")
+                    expr_call("Zero", vec![expr_i64(leaf_id)])
                 } else if value.is_exact_one() {
-                    format!("(One {leaf_id})")
+                    expr_call("One", vec![expr_i64(leaf_id)])
                 } else {
-                    format!("(Leaf {leaf_id})")
+                    expr_call("Leaf", vec![expr_i64(leaf_id)])
                 }
             }
 
@@ -328,62 +340,62 @@ impl<'a> EgglogContext<'a> {
                 let out_id = self.out.load(*buffer, node.ty.clone());
                 self.built_map.insert(id, out_id);
                 let leaf_id = self.alloc_leaf(LeafKind::Node(out_id));
-                format!("(Leaf {leaf_id})")
+                expr_call("Leaf", vec![expr_i64(leaf_id)])
             }
 
             // Algebraic unary ops
             Op::Neg(input) => {
                 let inner = self.encode(*input);
-                format!("(ENeg {inner})")
+                expr_call("ENeg", vec![inner])
             }
             Op::Recip(input) => {
                 let inner = self.encode(*input);
-                format!("(ERecip {inner})")
+                expr_call("ERecip", vec![inner])
             }
             Op::Exp(input) => {
                 let inner = self.encode(*input);
-                format!("(EExp {inner})")
+                expr_call("EExp", vec![inner])
             }
             Op::Log(input) => {
                 let inner = self.encode(*input);
-                format!("(ELog {inner})")
+                expr_call("ELog", vec![inner])
             }
             Op::Sqrt(input) => {
                 let inner = self.encode(*input);
-                format!("(ESqrt {inner})")
+                expr_call("ESqrt", vec![inner])
             }
             Op::Sin(input) => {
                 let inner = self.encode(*input);
-                format!("(ESin {inner})")
+                expr_call("ESin", vec![inner])
             }
 
             // Cast
             Op::Cast { input, to } => {
                 let inner = self.encode(*input);
                 let did = self.alloc_dtype(*to);
-                format!("(ECast {inner} {did})")
+                expr_call("ECast", vec![inner, expr_i64(did)])
             }
 
             // Algebraic binary ops
             Op::Add(a, b) => {
                 let la = self.encode(*a);
                 let lb = self.encode(*b);
-                format!("(EAdd {la} {lb})")
+                expr_call("EAdd", vec![la, lb])
             }
             Op::Mul(a, b) => {
                 let la = self.encode(*a);
                 let lb = self.encode(*b);
-                format!("(EMul {la} {lb})")
+                expr_call("EMul", vec![la, lb])
             }
             Op::Max(a, b) => {
                 let la = self.encode(*a);
                 let lb = self.encode(*b);
-                format!("(EMax {la} {lb})")
+                expr_call("EMax", vec![la, lb])
             }
             Op::Min(a, b) => {
                 let la = self.encode(*a);
                 let lb = self.encode(*b);
-                format!("(EMin {la} {lb})")
+                expr_call("EMin", vec![la, lb])
             }
 
             // Reshape: encode with identity elimination
@@ -395,7 +407,7 @@ impl<'a> EgglogContext<'a> {
                     return inner;
                 }
                 let sid = self.alloc_shape(shape.clone());
-                format!("(EReshape {inner} {sid})")
+                expr_call("EReshape", vec![inner, expr_i64(sid)])
             }
 
             // Permute: encode with identity elimination
@@ -410,7 +422,7 @@ impl<'a> EgglogContext<'a> {
                     return inner;
                 }
                 let pid = self.alloc_permute(axes.clone());
-                format!("(EPermute {inner} {pid})")
+                expr_call("EPermute", vec![inner, expr_i64(pid)])
             }
 
             // Expand: encode with identity elimination
@@ -422,7 +434,7 @@ impl<'a> EgglogContext<'a> {
                     return inner;
                 }
                 let sid = self.alloc_shape(shape.clone());
-                format!("(EExpand {inner} {sid})")
+                expr_call("EExpand", vec![inner, expr_i64(sid)])
             }
 
             // Barrier ops: don't create egglog terms. Process recursively.
@@ -430,7 +442,7 @@ impl<'a> EgglogContext<'a> {
                 self.encode_barrier(id);
                 // Return a dummy — this won't be used for extraction since
                 // barrier roots are handled separately.
-                String::new()
+                expr_call("Leaf", vec![expr_i64(-1)])
             }
         };
 
@@ -486,43 +498,46 @@ fn rebuild_all_barriers(
     remap
 }
 
+fn expr_i64(v: i64) -> EggExpr {
+    EggExpr::Lit(egglog::ast::Span::Panic, egglog::ast::Literal::Int(v))
+}
+
+fn expr_call(name: &str, args: Vec<EggExpr>) -> EggExpr {
+    EggExpr::Call(egglog::ast::Span::Panic, name.to_string(), args)
+}
+
 fn decode_term(
-    term: &str,
+    termdag: &egglog::TermDag,
+    term: &egglog::Term,
     leaves: &[LeafKind],
     shapes: &[Vec<Dim>],
     dtypes: &[DType],
     permutes: &[Vec<usize>],
     out: &mut HLIRGraph,
-    memo: &mut HashMap<String, NodeId>,
+    memo: &mut HashMap<egglog::TermId, NodeId>,
 ) -> NodeId {
-    if let Some(&id) = memo.get(term) {
+    let term_id = termdag.lookup(term);
+    if let Some(&id) = memo.get(&term_id) {
         return id;
     }
-    let id = decode_inner(term, leaves, shapes, dtypes, permutes, out, memo);
-    memo.insert(term.to_string(), id);
+    let id = decode_inner(termdag, term, leaves, shapes, dtypes, permutes, out, memo);
+    memo.insert(term_id, id);
     id
 }
 
 fn decode_inner(
-    term: &str,
+    termdag: &egglog::TermDag,
+    term: &egglog::Term,
     leaves: &[LeafKind],
     shapes: &[Vec<Dim>],
     dtypes: &[DType],
     permutes: &[Vec<usize>],
     out: &mut HLIRGraph,
-    memo: &mut HashMap<String, NodeId>,
+    memo: &mut HashMap<egglog::TermId, NodeId>,
 ) -> NodeId {
-    let term = term.trim();
-    if !term.starts_with('(') || !term.ends_with(')') {
-        panic!("malformed egglog term: {term}");
-    }
-
-    let inner = &term[1..term.len() - 1];
-    let (ctor, rest) = split_first_token(inner);
-
-    match ctor {
-        "Leaf" | "Zero" | "One" => {
-            let leaf_id: usize = rest.trim().parse().expect("leaf id");
+    match term {
+        egglog::Term::App(ctor, args) if ctor == "Leaf" || ctor == "Zero" || ctor == "One" => {
+            let leaf_id = decode_i64_arg(termdag, args, 0, "leaf id") as usize;
             match &leaves[leaf_id] {
                 LeafKind::Node(nid) => *nid,
                 LeafKind::Const { ty, value } => {
@@ -530,121 +545,247 @@ fn decode_inner(
                 }
             }
         }
-        "EAdd" => {
-            let (a, b) = split_two_sexprs(rest);
-            let la = decode_term(a, leaves, shapes, dtypes, permutes, out, memo);
-            let lb = decode_term(b, leaves, shapes, dtypes, permutes, out, memo);
+        egglog::Term::App(ctor, args) if ctor == "EAdd" => {
+            let la = decode_term(
+                termdag,
+                termdag.get(args[0]),
+                leaves,
+                shapes,
+                dtypes,
+                permutes,
+                out,
+                memo,
+            );
+            let lb = decode_term(
+                termdag,
+                termdag.get(args[1]),
+                leaves,
+                shapes,
+                dtypes,
+                permutes,
+                out,
+                memo,
+            );
             out.binary(la, lb, Op::Add)
         }
-        "EMul" => {
-            let (a, b) = split_two_sexprs(rest);
-            let la = decode_term(a, leaves, shapes, dtypes, permutes, out, memo);
-            let lb = decode_term(b, leaves, shapes, dtypes, permutes, out, memo);
+        egglog::Term::App(ctor, args) if ctor == "EMul" => {
+            let la = decode_term(
+                termdag,
+                termdag.get(args[0]),
+                leaves,
+                shapes,
+                dtypes,
+                permutes,
+                out,
+                memo,
+            );
+            let lb = decode_term(
+                termdag,
+                termdag.get(args[1]),
+                leaves,
+                shapes,
+                dtypes,
+                permutes,
+                out,
+                memo,
+            );
             out.binary(la, lb, Op::Mul)
         }
-        "EMax" => {
-            let (a, b) = split_two_sexprs(rest);
-            let la = decode_term(a, leaves, shapes, dtypes, permutes, out, memo);
-            let lb = decode_term(b, leaves, shapes, dtypes, permutes, out, memo);
+        egglog::Term::App(ctor, args) if ctor == "EMax" => {
+            let la = decode_term(
+                termdag,
+                termdag.get(args[0]),
+                leaves,
+                shapes,
+                dtypes,
+                permutes,
+                out,
+                memo,
+            );
+            let lb = decode_term(
+                termdag,
+                termdag.get(args[1]),
+                leaves,
+                shapes,
+                dtypes,
+                permutes,
+                out,
+                memo,
+            );
             out.binary(la, lb, Op::Max)
         }
-        "EMin" => {
-            let (a, b) = split_two_sexprs(rest);
-            let la = decode_term(a, leaves, shapes, dtypes, permutes, out, memo);
-            let lb = decode_term(b, leaves, shapes, dtypes, permutes, out, memo);
+        egglog::Term::App(ctor, args) if ctor == "EMin" => {
+            let la = decode_term(
+                termdag,
+                termdag.get(args[0]),
+                leaves,
+                shapes,
+                dtypes,
+                permutes,
+                out,
+                memo,
+            );
+            let lb = decode_term(
+                termdag,
+                termdag.get(args[1]),
+                leaves,
+                shapes,
+                dtypes,
+                permutes,
+                out,
+                memo,
+            );
             out.binary(la, lb, Op::Min)
         }
-        "ENeg" => {
-            let c = decode_term(rest.trim(), leaves, shapes, dtypes, permutes, out, memo);
+        egglog::Term::App(ctor, args) if ctor == "ENeg" => {
+            let c = decode_term(
+                termdag,
+                termdag.get(args[0]),
+                leaves,
+                shapes,
+                dtypes,
+                permutes,
+                out,
+                memo,
+            );
             out.unary(c, Op::Neg)
         }
-        "ERecip" => {
-            let c = decode_term(rest.trim(), leaves, shapes, dtypes, permutes, out, memo);
+        egglog::Term::App(ctor, args) if ctor == "ERecip" => {
+            let c = decode_term(
+                termdag,
+                termdag.get(args[0]),
+                leaves,
+                shapes,
+                dtypes,
+                permutes,
+                out,
+                memo,
+            );
             out.unary(c, Op::Recip)
         }
-        "EExp" => {
-            let c = decode_term(rest.trim(), leaves, shapes, dtypes, permutes, out, memo);
+        egglog::Term::App(ctor, args) if ctor == "EExp" => {
+            let c = decode_term(
+                termdag,
+                termdag.get(args[0]),
+                leaves,
+                shapes,
+                dtypes,
+                permutes,
+                out,
+                memo,
+            );
             out.unary(c, Op::Exp)
         }
-        "ELog" => {
-            let c = decode_term(rest.trim(), leaves, shapes, dtypes, permutes, out, memo);
+        egglog::Term::App(ctor, args) if ctor == "ELog" => {
+            let c = decode_term(
+                termdag,
+                termdag.get(args[0]),
+                leaves,
+                shapes,
+                dtypes,
+                permutes,
+                out,
+                memo,
+            );
             out.unary(c, Op::Log)
         }
-        "ESqrt" => {
-            let c = decode_term(rest.trim(), leaves, shapes, dtypes, permutes, out, memo);
+        egglog::Term::App(ctor, args) if ctor == "ESqrt" => {
+            let c = decode_term(
+                termdag,
+                termdag.get(args[0]),
+                leaves,
+                shapes,
+                dtypes,
+                permutes,
+                out,
+                memo,
+            );
             out.unary(c, Op::Sqrt)
         }
-        "ESin" => {
-            let c = decode_term(rest.trim(), leaves, shapes, dtypes, permutes, out, memo);
+        egglog::Term::App(ctor, args) if ctor == "ESin" => {
+            let c = decode_term(
+                termdag,
+                termdag.get(args[0]),
+                leaves,
+                shapes,
+                dtypes,
+                permutes,
+                out,
+                memo,
+            );
             out.unary(c, Op::Sin)
         }
-        "EReshape" => {
-            let (child_term, sid_str) = split_two_sexprs(rest);
-            let c = decode_term(child_term, leaves, shapes, dtypes, permutes, out, memo);
-            let sid: usize = sid_str.trim().parse().expect("shape id");
+        egglog::Term::App(ctor, args) if ctor == "EReshape" => {
+            let c = decode_term(
+                termdag,
+                termdag.get(args[0]),
+                leaves,
+                shapes,
+                dtypes,
+                permutes,
+                out,
+                memo,
+            );
+            let sid = decode_i64_arg(termdag, args, 1, "shape id") as usize;
             out.reshape(c, shapes[sid].clone())
         }
-        "ECast" => {
-            let (child_term, did_str) = split_two_sexprs(rest);
-            let c = decode_term(child_term, leaves, shapes, dtypes, permutes, out, memo);
-            let did: usize = did_str.trim().parse().expect("dtype id");
+        egglog::Term::App(ctor, args) if ctor == "ECast" => {
+            let c = decode_term(
+                termdag,
+                termdag.get(args[0]),
+                leaves,
+                shapes,
+                dtypes,
+                permutes,
+                out,
+                memo,
+            );
+            let did = decode_i64_arg(termdag, args, 1, "dtype id") as usize;
             out.cast(c, dtypes[did])
         }
-        "EPermute" => {
-            let (child_term, pid_str) = split_two_sexprs(rest);
-            let c = decode_term(child_term, leaves, shapes, dtypes, permutes, out, memo);
-            let pid: usize = pid_str.trim().parse().expect("permute id");
+        egglog::Term::App(ctor, args) if ctor == "EPermute" => {
+            let c = decode_term(
+                termdag,
+                termdag.get(args[0]),
+                leaves,
+                shapes,
+                dtypes,
+                permutes,
+                out,
+                memo,
+            );
+            let pid = decode_i64_arg(termdag, args, 1, "permute id") as usize;
             out.permute(c, permutes[pid].clone())
         }
-        "EExpand" => {
-            let (child_term, sid_str) = split_two_sexprs(rest);
-            let c = decode_term(child_term, leaves, shapes, dtypes, permutes, out, memo);
-            let sid: usize = sid_str.trim().parse().expect("shape id");
+        egglog::Term::App(ctor, args) if ctor == "EExpand" => {
+            let c = decode_term(
+                termdag,
+                termdag.get(args[0]),
+                leaves,
+                shapes,
+                dtypes,
+                permutes,
+                out,
+                memo,
+            );
+            let sid = decode_i64_arg(termdag, args, 1, "shape id") as usize;
             out.expand(c, shapes[sid].clone())
         }
-        other => panic!("unknown egglog constructor: {other}"),
+        egglog::Term::App(other, _) => panic!("unknown egglog constructor: {other}"),
+        other => panic!("malformed egglog term: {other:?}"),
     }
 }
 
-/// Split the first whitespace-delimited token from an s-expression body.
-fn split_first_token(s: &str) -> (&str, &str) {
-    let s = s.trim();
-    if let Some(idx) = s.find(|c: char| c.is_whitespace()) {
-        (&s[..idx], &s[idx..])
-    } else {
-        (s, "")
-    }
-}
-
-/// Split two s-expressions from a string like " (Foo ...) (Bar ...)" or " (Foo ...) atom".
-fn split_two_sexprs(s: &str) -> (&str, &str) {
-    let s = s.trim();
-    let end_of_first = find_sexpr_end(s);
-    let first = &s[..end_of_first];
-    let rest = s[end_of_first..].trim();
-    (first, rest)
-}
-
-/// Find the end index of the first s-expression in `s`.
-fn find_sexpr_end(s: &str) -> usize {
-    if s.starts_with('(') {
-        let mut depth = 0;
-        for (i, c) in s.char_indices() {
-            match c {
-                '(' => depth += 1,
-                ')' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return i + 1;
-                    }
-                }
-                _ => {}
-            }
-        }
-        s.len()
-    } else {
-        // Atom — find next whitespace or end.
-        s.find(|c: char| c.is_whitespace()).unwrap_or(s.len())
+fn decode_i64_arg(
+    termdag: &egglog::TermDag,
+    args: &[egglog::TermId],
+    idx: usize,
+    what: &str,
+) -> i64 {
+    let arg = termdag.get(args[idx]);
+    match arg {
+        egglog::Term::Lit(egglog::ast::Literal::Int(v)) => *v,
+        _ => panic!("expected int literal for {what}, got {arg:?}"),
     }
 }
 
