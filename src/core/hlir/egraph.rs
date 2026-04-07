@@ -503,7 +503,7 @@ fn expr_i64(v: i64) -> EggExpr {
 }
 
 fn expr_call(name: &str, args: Vec<EggExpr>) -> EggExpr {
-    EggExpr::Call(egglog::ast::Span::Panic, name.to_string(), args)
+    EggExpr::Call(egglog::ast::Span::Panic, name.into(), args)
 }
 
 fn decode_term(

@@ -40,3 +40,27 @@ impl std::ops::Div for Dim {
         Self::Div(Box::new(self), Box::new(rhs))
     }
 }
+
+impl std::ops::Mul for &Dim {
+    type Output = Dim;
+
+    fn mul(self, rhs: Self) -> Dim {
+        Dim::Mul(Box::new(self.clone()), Box::new(rhs.clone()))
+    }
+}
+
+impl std::ops::Add for &Dim {
+    type Output = Dim;
+
+    fn add(self, rhs: Self) -> Dim {
+        Dim::Add(Box::new(self.clone()), Box::new(rhs.clone()))
+    }
+}
+
+impl std::ops::Div for &Dim {
+    type Output = Dim;
+
+    fn div(self, rhs: Self) -> Dim {
+        Dim::Div(Box::new(self.clone()), Box::new(rhs.clone()))
+    }
+}

@@ -219,7 +219,7 @@ impl TensorType {
         }
         let mut strides = vec![Dim::Const(1); shape.len()];
         for i in (0..shape.len() - 1).rev() {
-            strides[i] = strides[i + 1].clone() * shape[i + 1].clone();
+            strides[i] = &strides[i + 1] * &shape[i + 1];
         }
         strides
     }

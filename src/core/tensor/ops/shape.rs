@@ -161,7 +161,7 @@ impl Tensor {
 
         let inputs = vec![self.id, other.id];
         let new_shape = self.shape.clone();
-        let new_shape_axis = self.shape[axis].clone() + other.shape[axis].clone();
+        let new_shape_axis = &self.shape[axis] + &other.shape[axis];
         let mut out_shape = new_shape.clone();
         out_shape[axis] = new_shape_axis;
 

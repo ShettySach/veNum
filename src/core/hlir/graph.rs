@@ -142,7 +142,11 @@ impl HLIRGraph {
             .iter()
             .map(|r| match (&r.start, &r.end) {
                 (Dim::Const(s), Dim::Const(e)) => Dim::Const(e - s),
-                _ => r.end.clone() + Dim::Const(-1) * r.start.clone(),
+                _ => {
+                    let neg_one = Dim::Const(-1);
+                    let mul_result = &neg_one * &r.start;
+                    &r.end + &mul_result
+                }
             })
             .collect();
 
@@ -182,7 +186,7 @@ impl HLIRGraph {
             let b = &ty.shape[axis];
             shape[axis] = match (a, b) {
                 (Dim::Const(av), Dim::Const(bv)) => Dim::Const(av + bv),
-                _ => a.clone() + b.clone(),
+                _ => a + b,
             };
         }
 
