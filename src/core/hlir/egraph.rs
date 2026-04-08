@@ -69,20 +69,36 @@ pub fn egglog_algebraic(
 
     // Run egglog.
     let mut egraph = egglog::EGraph::default();
-    if egraph.parse_and_run_program(None, EGGLOG_SCHEMA).is_err() {
+    if let Err(e) = egraph.parse_and_run_program(None, EGGLOG_SCHEMA) {
+        eprintln!(
+            "[egraph] failed to parse schema ({}), skipping optimization and returning identity",
+            e
+        );
         let identity_map = roots.iter().map(|&id| (id, id)).collect();
         return (graph.clone(), identity_map);
     }
 
     // Intern all root terms before saturation.
-    for (expr, _) in &extract_entries {
-        if egraph.eval_expr(expr).is_err() {
+    for (expr, src_id) in &extract_entries {
+        if let Err(e) = egraph.eval_expr(expr) {
+            eprintln!(
+                "[egraph] failed to intern term for node {:?} ({}), skipping optimization and returning identity",
+                src_id, e
+            );
             let identity_map = roots.iter().map(|&id| (id, id)).collect();
             return (graph.clone(), identity_map);
         }
     }
 
-    if egraph.parse_and_run_program(None, "(run 10)").is_err() {
+    // Run egglog saturation to fixed point.
+    // Using (run-schedule (saturate (run))) to ensure full saturation rather than
+    // a fixed iteration count. This guarantees the extracted term is optimal
+    // for the given rewrite rules, not just optimal within an arbitrary budget.
+    if let Err(e) = egraph.parse_and_run_program(None, "(run-schedule (saturate (run)))") {
+        eprintln!(
+            "[egraph] failed to run saturation ({}), skipping optimization and returning identity",
+            e
+        );
         let identity_map = roots.iter().map(|&id| (id, id)).collect();
         return (graph.clone(), identity_map);
     }
@@ -93,7 +109,11 @@ pub fn egglog_algebraic(
     for (expr, src_id) in &extract_entries {
         match egraph.eval_expr(expr) {
             Ok((sort, value)) => extracted_inputs.push((*src_id, sort, value)),
-            Err(_) => {
+            Err(e) => {
+                eprintln!(
+                    "[egraph] failed to re-evaluate term for node {:?} after saturation ({}), skipping optimization and returning identity",
+                    src_id, e
+                );
                 let identity_map = roots.iter().map(|&id| (id, id)).collect();
                 return (graph.clone(), identity_map);
             }
@@ -109,16 +129,18 @@ pub fn egglog_algebraic(
                 egglog::extract::TreeAdditiveCostModel::default(),
             );
             let mut termdag = egglog::TermDag::default();
-            let out = extractor
+            extractor
                 .extract_best_with_sort(&egraph, &mut termdag, value, sort)
                 .map(|(_, term_id)| (src_id, termdag, term_id))
-                .ok_or(())
-                ;
-            out
+                .ok_or(src_id)
         })
         .collect::<Result<_, _>>()
     {
-        Err(()) => {
+        Err(failed_node) => {
+            eprintln!(
+                "[egraph] failed to extract optimal term for node {:?}, skipping optimization and returning identity",
+                failed_node
+            );
             let identity_map = roots.iter().map(|&id| (id, id)).collect();
             return (graph.clone(), identity_map);
         }
@@ -327,6 +349,15 @@ impl<'a> EgglogContext<'a> {
     }
 
     /// Recursively process a barrier node: register it and encode/process its inputs.
+    ///
+    /// TOPOLOGICAL ORDER GUARANTEE:
+    /// This method ensures that non-algebraic inputs are processed and pushed to
+    /// `self.barriers` *before* the current node. The recursive call structure:
+    ///   1. For each non-algebraic input: recursively call `encode_barrier(input)`
+    ///   2. Only after all inputs are processed: push current node to `self.barriers`
+    ///
+    /// This guarantees that `self.barriers` is built in valid topological order,
+    /// which is required for correct reconstruction in `rebuild_all_barriers`.
     fn encode_barrier(&mut self, id: NodeId) {
         if self.barriers.iter().any(|b| b.src_id == id) {
             return; // Already processed.
@@ -500,6 +531,32 @@ impl<'a> EgglogContext<'a> {
 
 /// Rebuild all barrier nodes, mapping their inputs through decoded algebraic
 /// roots and previously-rebuilt barriers.
+///
+/// # Topological Order Invariant
+///
+/// **CRITICAL CORRECTNESS REQUIREMENT:**
+/// This function requires that `barriers` is in valid topological order where:
+/// - A barrier's non-algebraic inputs either:
+///   1. Are user-provided roots (appear in the `roots` parameter), OR
+///   2. Appear earlier in the `barriers` slice as already-rebuilt barriers
+///
+/// This invariant is enforced at encode time: `encode_barrier` recursively calls
+/// itself on non-algebraic inputs *before* pushing the current barrier to the list.
+/// The recursive structure of `encode_barrier` guarantees that dependencies always
+/// appear before consumers in the `barriers` vector.
+///
+/// **Why this matters:**
+/// When rebuilding a barrier, we look up its non-algebraic inputs in `remap`.
+/// If those inputs haven't been rebuilt yet (i.e., they appear *later* in the
+/// barriers list), the lookup will fail and we'll fall back to the original
+/// source node. This produces semantically incorrect graphs where optimized
+/// algebraic sub-expressions are not properly connected to their barrier consumers.
+///
+/// **Enforcement:**
+/// This invariant is structurally guaranteed by the recursive encoding process,
+/// not checked at runtime (checking would require re-analyzing the dependency DAG).
+/// Any refactoring of `encode_barrier` must preserve the property that non-algebraic
+/// inputs are recursively processed before the current node is registered.
 fn rebuild_all_barriers(
     src: &HLIRGraph,
     roots: &[NodeId],
@@ -510,7 +567,6 @@ fn rebuild_all_barriers(
 ) -> HashMap<NodeId, NodeId> {
     let mut remap: HashMap<NodeId, NodeId> = HashMap::new();
 
-    // Copy input_map entries that are roots.
     for &r in roots {
         if let Some(&out_id) = input_map.get(&r) {
             remap.insert(r, out_id);
@@ -524,10 +580,8 @@ fn rebuild_all_barriers(
 
         for (k, &inp) in src_inputs.iter().enumerate() {
             if let Some(alg_idx) = barrier.input_alg_indices[k] {
-                // This input was algebraic — use the decoded result.
                 new_inputs.push(alg_decoded[alg_idx]);
             } else {
-                // Non-algebraic input — look up in remap (other barriers) or input_map.
                 let built = remap
                     .get(&inp)
                     .or_else(|| input_map.get(&inp))
@@ -712,8 +766,15 @@ fn decode_inner(
                 return base;
             }
             let ty = out.ty(base).clone();
-            let c = out.constant(Scalar::from_f64(coeff.to_f64(), ty.dtype), ty.shape, ty.dtype);
-            out.binary(base, c, Op::Mul)
+            // Create a scalar constant (shape []) and broadcast via Mul.
+            // This avoids materializing a large constant tensor when EScale
+            // represents a uniform scalar multiply on a large tensor.
+            let scalar_const = out.constant(
+                Scalar::from_f64(coeff.to_f64(), ty.dtype),
+                vec![],
+                ty.dtype,
+            );
+            out.binary(base, scalar_const, Op::Mul)
         }
         egglog::Term::App(ctor, args) if ctor == "ENeg" => {
             let c = decode_term(
@@ -867,7 +928,15 @@ fn decode_i64_arg(
     }
 }
 
-fn decode_num(termdag: &egglog::TermDag, term: &egglog::Term, leaves: &[LeafKind]) -> Scalar {
+fn decode_num(
+    termdag: &egglog::TermDag,
+    term: &egglog::Term,
+    leaves: &[LeafKind],
+) -> Scalar {
+    decode_num_inner(termdag, term, leaves)
+}
+
+fn decode_num_inner(termdag: &egglog::TermDag, term: &egglog::Term, leaves: &[LeafKind]) -> Scalar {
     match term {
         egglog::Term::App(ctor, args) if ctor == "NConst" => {
             let leaf_id = decode_i64_arg(termdag, args, 0, "num const id") as usize;
@@ -881,14 +950,38 @@ fn decode_num(termdag: &egglog::TermDag, term: &egglog::Term, leaves: &[LeafKind
             Scalar::I64(v)
         }
         egglog::Term::App(ctor, args) if ctor == "NAdd" => {
-            let a = decode_num(termdag, termdag.get(args[0]), leaves).to_f64();
-            let b = decode_num(termdag, termdag.get(args[1]), leaves).to_f64();
-            Scalar::F64(a + b)
+            let a = decode_num_inner(termdag, termdag.get(args[0]), leaves);
+            let b = decode_num_inner(termdag, termdag.get(args[1]), leaves);
+            match (&a, &b) {
+                // Preserve integer arithmetic when both operands are integers.
+                (Scalar::I64(av), Scalar::I64(bv)) => Scalar::I64(av.wrapping_add(*bv)),
+                // Promote to appropriate float type when mixing with floats.
+                (Scalar::I64(av), _) if b.dtype().is_float() => {
+                    Scalar::from_f64(*av as f64 + b.to_f64(), b.dtype())
+                }
+                (_, Scalar::I64(bv)) if a.dtype().is_float() => {
+                    Scalar::from_f64(a.to_f64() + *bv as f64, a.dtype())
+                }
+                // Both floats: preserve the dtype of the first operand.
+                _ => Scalar::from_f64(a.to_f64() + b.to_f64(), a.dtype()),
+            }
         }
         egglog::Term::App(ctor, args) if ctor == "NMul" => {
-            let a = decode_num(termdag, termdag.get(args[0]), leaves).to_f64();
-            let b = decode_num(termdag, termdag.get(args[1]), leaves).to_f64();
-            Scalar::F64(a * b)
+            let a = decode_num_inner(termdag, termdag.get(args[0]), leaves);
+            let b = decode_num_inner(termdag, termdag.get(args[1]), leaves);
+            match (&a, &b) {
+                // Preserve integer arithmetic when both operands are integers.
+                (Scalar::I64(av), Scalar::I64(bv)) => Scalar::I64(av.wrapping_mul(*bv)),
+                // Promote to appropriate float type when mixing with floats.
+                (Scalar::I64(av), _) if b.dtype().is_float() => {
+                    Scalar::from_f64(*av as f64 * b.to_f64(), b.dtype())
+                }
+                (_, Scalar::I64(bv)) if a.dtype().is_float() => {
+                    Scalar::from_f64(a.to_f64() * *bv as f64, a.dtype())
+                }
+                // Both floats: preserve the dtype of the first operand.
+                _ => Scalar::from_f64(a.to_f64() * b.to_f64(), a.dtype()),
+            }
         }
         _ => panic!("unexpected numeric term in decode_num"),
     }
@@ -897,7 +990,7 @@ fn decode_num(termdag: &egglog::TermDag, term: &egglog::Term, leaves: &[LeafKind
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::hlir::{BufferId, DType, Dim, TensorType};
+    use crate::core::hlir::{BufferId, DType, Dim, ReduceOp, TensorType};
 
     fn f32_ty(dims: &[i64]) -> TensorType {
         TensorType::contiguous(dims.iter().map(|&d| Dim::Const(d)).collect(), DType::F32)
@@ -1013,6 +1106,47 @@ mod tests {
             "expected <= 2 nodes (Load + Reshape), got {}",
             opt.len()
         );
+    }
+
+    #[test]
+    fn true_barrier_reduce_with_algebraic_input() {
+        // Test a true non-algebraic barrier (Reduce) with an algebraic input
+        // that gets optimized: Reduce(Add(x, Const(0)), axes) -> Reduce(x, axes)
+        //
+        // This is the key test that the review requested: confirming that barrier
+        // ops (like Reduce, which is not in the is_algebraic list) correctly
+        // have their algebraic inputs optimized through the e-graph.
+        let mut g = HLIRGraph::new();
+        let x = g.load(BufferId(0), f32_ty(&[4, 8]));
+        let zero = g.constant(
+            Scalar::F32(0.0),
+            vec![Dim::Const(4), Dim::Const(8)],
+            DType::F32,
+        );
+        let add = g.binary(x, zero, Op::Add);
+        let reduce = g.reduce(add, vec![1], ReduceOp::Sum, false);
+
+        let (opt, remap) = egglog_algebraic(&g, &[reduce]);
+        let out_root = remap[&reduce];
+
+        // The reduce should still exist (it's a barrier, not algebraic).
+        assert!(
+            matches!(opt.node(out_root).op, Op::Reduce { .. }),
+            "Reduce barrier should be preserved, got {:?}",
+            opt.node(out_root).op.name()
+        );
+
+        // The key property: the algebraic sub-expression Add(x, 0) should have
+        // been optimized to just x. So the Reduce's input should be a Load, not an Add.
+        if let Op::Reduce { input, .. } = &opt.node(out_root).op {
+            assert!(
+                matches!(opt.node(*input).op, Op::Load { .. }),
+                "Reduce input should be simplified from Add(x, 0) to just x (Load), got {:?}",
+                opt.node(*input).op.name()
+            );
+        } else {
+            panic!("Expected Reduce at root");
+        }
     }
 
     #[test]
