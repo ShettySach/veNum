@@ -2,7 +2,7 @@
 mod hlir_tests {
     use crate::core::hlir::optimize::{canonicalize_hlir, canonicalize_with_roots};
     use crate::core::hlir::{
-        BufferId, DType, Dim, HLIRGraph, NodeId, Op, ReduceOp, Scalar, TensorType, decompose,
+        decompose, BufferId, DType, Dim, HLIRGraph, Op, ReduceOp, Scalar, TensorType,
     };
 
     #[test]
@@ -65,6 +65,36 @@ mod hlir_tests {
     }
 
     #[test]
+    fn broadcast_adds_leading_and_singleton_zero_strides() {
+        let mut g = HLIRGraph::new();
+        let input = g.load(
+            BufferId(0),
+            TensorType::contiguous(vec![Dim::Const(1), Dim::Const(4)], DType::F32),
+        );
+        let broadcasted = g.broadcast(input, vec![Dim::Const(2), Dim::Const(4)]);
+
+        assert!(matches!(g.node(broadcasted).op, Op::Broadcast { .. }));
+        assert_eq!(
+            g.ty(broadcasted).strides(),
+            vec![Dim::Const(0), Dim::Const(1)]
+        );
+    }
+
+    #[test]
+    fn broadcast_can_increase_rank() {
+        let mut g = HLIRGraph::new();
+        let scalar = g.constant(Scalar::F32(2.0), vec![], DType::F32);
+        let broadcasted = g.broadcast(scalar, vec![Dim::Const(2), Dim::Const(3)]);
+
+        assert!(matches!(g.node(broadcasted).op, Op::Broadcast { .. }));
+        assert_eq!(g.ty(broadcasted).shape, vec![Dim::Const(2), Dim::Const(3)]);
+        assert_eq!(
+            g.ty(broadcasted).strides(),
+            vec![Dim::Const(0), Dim::Const(0)]
+        );
+    }
+
+    #[test]
     fn canonicalize_sinks_reshapes_through_elementwise() {
         let mut g = HLIRGraph::new();
         let a = g.load(
@@ -101,21 +131,23 @@ mod hlir_tests {
         let mut g = HLIRGraph::new();
         let ty = TensorType::contiguous(vec![Dim::Const(5)], DType::F32);
         let x = g.load(BufferId(0), ty);
-        let two = g.constant(Scalar::F32(2.0), vec![Dim::Const(5)], DType::F32);
+        let two = g.constant(Scalar::F32(2.0), vec![], DType::F32);
 
         let x2 = g.binary(x, two, Op::Mul);
         let left = g.binary(x2, x, Op::Add);
         let root = g.binary(left, left, Op::Add);
 
         let opt = canonicalize_with_roots(&g, &[root]);
-        assert_eq!(
-            opt.len(),
-            3,
-            "expected Load + Const + Mul, got {}",
-            opt.len()
-        );
+        let mul_count = opt
+            .topo_iter()
+            .filter(|(_, node)| matches!(node.op, Op::Mul(_, _)))
+            .count();
+        let add_count = opt
+            .topo_iter()
+            .filter(|(_, node)| matches!(node.op, Op::Add(_, _)))
+            .count();
 
-        let root_id = NodeId(opt.len() - 1);
-        assert!(matches!(opt.node(root_id).op, Op::Mul(_, _)));
+        assert_eq!(mul_count, 1, "expected a single Mul after canonicalization");
+        assert_eq!(add_count, 0, "expected all Add nodes to be folded away");
     }
 }

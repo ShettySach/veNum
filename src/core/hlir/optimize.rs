@@ -32,7 +32,7 @@ pub fn canonicalize_with_roots_and_map(
     roots: &[NodeId],
 ) -> (HLIRGraph, HashMap<NodeId, NodeId>) {
     // Single pass: egglog handles algebraic simplification + reshape sinking.
-    let (g, map) = super::egraph::egglog_algebraic(graph, roots);
+    let (g, map) = super::egraph::canonicalize_algebraic(graph, roots);
     let remapped_roots: Vec<NodeId> = roots
         .iter()
         .map(|id| map.get(id).copied().unwrap_or(*id))
@@ -163,6 +163,10 @@ pub(super) fn remap_op_inputs(op: &Op, new_inputs: &[NodeId]) -> Op {
             ranges: ranges.clone(),
         },
         Op::Expand { shape, .. } => Op::Expand {
+            input: it.next().unwrap(),
+            shape: shape.clone(),
+        },
+        Op::Broadcast { shape, .. } => Op::Broadcast {
             input: it.next().unwrap(),
             shape: shape.clone(),
         },

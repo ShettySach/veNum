@@ -2,10 +2,10 @@
 mod tests {
     use anyhow::Result;
 
-    use crate::core::compile::{SearchConfig, compile};
+    use crate::core::compile::{compile, SearchConfig};
     use crate::core::cpu::{Buffer, CpuCodeGenerator};
     use crate::core::dep::NoOpDependenceAnalyzer;
-    use crate::core::hlir::{BufferId, DType, Dim, HLIRGraph, Op, TensorType};
+    use crate::core::hlir::{BufferId, DType, Dim, HLIRGraph, Op, Scalar, TensorType};
     use crate::core::schedule::TrivialHardware;
 
     #[test]
@@ -226,6 +226,98 @@ mod tests {
         match &out[0] {
             Buffer::F32(v) => assert_eq!(v, &vec![1.0, 2.0, 3.0, 4.0]),
             _ => panic!("unexpected output dtype"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn randomized_algebraic_equivalence_small_shapes() -> Result<()> {
+        fn next_u32(state: &mut u64) -> u32 {
+            *state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (*state >> 32) as u32
+        }
+
+        fn next_f32(state: &mut u64) -> f32 {
+            let v = next_u32(state) as f32 / (u32::MAX as f32);
+            (v * 4.0) - 2.0
+        }
+
+        fn as_f32_slice(buf: &Buffer) -> &[f32] {
+            match buf {
+                Buffer::F32(v) => v,
+                _ => panic!("unexpected dtype in randomized equivalence test"),
+            }
+        }
+
+        fn assert_close(lhs: &[f32], rhs: &[f32]) {
+            assert_eq!(lhs.len(), rhs.len());
+            for (i, (a, b)) in lhs.iter().zip(rhs.iter()).enumerate() {
+                let diff = (a - b).abs();
+                assert!(diff <= 1e-4, "mismatch at {i}: {a} vs {b}, diff={diff}");
+            }
+        }
+
+        let mut rng = 0x5EED_F00Du64;
+        for _case in 0..20 {
+            let mut g = HLIRGraph::new();
+            let ty = TensorType::contiguous(vec![Dim::Const(2), Dim::Const(2)], DType::F32);
+            let a = g.load(BufferId(0), ty.clone());
+            let b = g.load(BufferId(1), ty);
+            let scalar = g.constant(
+                Scalar::F32(next_f32(&mut rng)),
+                vec![Dim::Const(2), Dim::Const(2)],
+                DType::F32,
+            );
+
+            let mul = g.binary(a, b, Op::Mul);
+            let add = g.binary(mul, scalar, Op::Add);
+            let neg = g.unary(add, Op::Neg);
+            let r1 = g.reshape(neg, vec![Dim::Const(4)]);
+            let r2 = g.reshape(r1, vec![Dim::Const(2), Dim::Const(2)]);
+            let p1 = g.permute(r2, vec![1, 0]);
+            let p2 = g.permute(p1, vec![1, 0]);
+            let max = g.binary(p2, a, Op::Max);
+            let root = g.binary(max, b, Op::Min);
+
+            let mut a_data = Vec::with_capacity(4);
+            let mut b_data = Vec::with_capacity(4);
+            for _ in 0..4 {
+                a_data.push(next_f32(&mut rng));
+                b_data.push(next_f32(&mut rng));
+            }
+
+            let enabled_module = compile(
+                g.clone(),
+                &TrivialHardware,
+                &NoOpDependenceAnalyzer,
+                &CpuCodeGenerator::new(vec![root]),
+                &SearchConfig::default(),
+                &[root],
+            )?;
+            let disabled_module = compile(
+                g,
+                &TrivialHardware,
+                &NoOpDependenceAnalyzer,
+                &CpuCodeGenerator::new(vec![root]),
+                &SearchConfig {
+                    enable_canonicalization: false,
+                    ..SearchConfig::default()
+                },
+                &[root],
+            )?;
+
+            let input_bindings = vec![
+                (BufferId(0), Buffer::F32(a_data)),
+                (BufferId(1), Buffer::F32(b_data)),
+            ];
+            let out_enabled = enabled_module.execute(&input_bindings)?;
+            let out_disabled = disabled_module.execute(&input_bindings)?;
+
+            assert_close(
+                as_f32_slice(&out_enabled[0]),
+                as_f32_slice(&out_disabled[0]),
+            );
         }
 
         Ok(())

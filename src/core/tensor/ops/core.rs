@@ -5,7 +5,6 @@ use anyhow::{Result, anyhow, bail};
 use crate::core::hlir::decompose;
 use crate::core::hlir::{Dim, NodeId, Op};
 
-use crate::core::tensor::helpers::unsqueeze_shape;
 use crate::core::tensor::structure::Tensor;
 
 impl Tensor {
@@ -37,16 +36,12 @@ impl Tensor {
         Ok(out)
     }
 
-    /// Broadcast a tensor's node to match the target shape, inserting
-    /// reshape+expand ops as needed. Returns the (possibly new) node id.
+    /// Broadcast a tensor's node to match the target shape.
     fn broadcast_to_shape(&self, node_id: NodeId, node_shape: &[Dim], target: &[Dim]) -> NodeId {
         if node_shape == target {
             return node_id;
         }
-        self.with_graph_mut(|g| {
-            let unsqueezed = g.reshape(node_id, unsqueeze_shape(node_shape, target.len()));
-            g.expand(unsqueezed, target.to_vec())
-        })
+        self.with_graph_mut(|g| g.broadcast(node_id, target.to_vec()))
     }
 
     /// Apply a binary operation with broadcasting.

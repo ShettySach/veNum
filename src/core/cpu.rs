@@ -249,6 +249,12 @@ fn eval_op(
                 .ok_or_else(|| anyhow::anyhow!("missing expand input"))?;
             expand(v, &shape)?
         }
+        Op::Broadcast { input, .. } => {
+            let v = values
+                .get(input)
+                .ok_or_else(|| anyhow::anyhow!("missing broadcast input"))?;
+            broadcast(v, &shape)?
+        }
         Op::Permute { input, axes } => {
             let v = values
                 .get(input)
@@ -499,6 +505,46 @@ fn expand(v: &TensorValue, out_shape: &[usize]) -> Result<TensorValue> {
             out_strides[i] = 0;
         }
     }
+    Ok(TensorValue {
+        shape: out_shape.to_vec(),
+        strides: out_strides,
+        offset: v.offset,
+        dtype: v.dtype,
+        data: v.data.clone(),
+    })
+}
+
+fn broadcast(v: &TensorValue, out_shape: &[usize]) -> Result<TensorValue> {
+    let in_rank = v.shape.len();
+    let out_rank = out_shape.len();
+    if in_rank > out_rank {
+        bail!("broadcast rank mismatch");
+    }
+
+    let rank_offset = out_rank - in_rank;
+    let mut out_strides = vec![0; out_rank];
+    for out_axis in 0..out_rank {
+        if out_axis < rank_offset {
+            continue;
+        }
+
+        let in_axis = out_axis - rank_offset;
+        if v.shape[in_axis] != 1 && v.shape[in_axis] != out_shape[out_axis] {
+            bail!(
+                "broadcast incompatible dim at axis {}: in={}, out={}",
+                out_axis,
+                v.shape[in_axis],
+                out_shape[out_axis]
+            );
+        }
+
+        out_strides[out_axis] = if v.shape[in_axis] == 1 {
+            0
+        } else {
+            v.strides[in_axis]
+        };
+    }
+
     Ok(TensorValue {
         shape: out_shape.to_vec(),
         strides: out_strides,

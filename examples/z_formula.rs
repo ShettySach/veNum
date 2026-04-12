@@ -1,12 +1,11 @@
 use anyhow::Result;
-use venum::{Buffer, Context, DType, Scalar, Tensor, run_context};
+use venum::{Buffer, Context, DType, Tensor, run_context};
 
 fn main() -> Result<()> {
     let cx = Context::new();
 
     let x = Tensor::placeholder(&cx, DType::F32, vec![5]);
-    let two = Tensor::constant_scalar(&cx, Scalar::F32(2.0), vec![5]);
-    let z = (&x * &two + &x) + (&x * &two + &x);
+    let z = (&x * 2 + &x) + (&x * 2 + &x);
 
     println!(
         "=== Optimized Graph ===\n{}",

@@ -93,7 +93,15 @@ impl std::ops::Neg for &Tensor {
 
 #[cfg(test)]
 mod tests {
+    use crate::core::hlir::Op;
     use crate::{Buffer, Context, DType, Tensor, run_context};
+
+    fn count_ops(graph: &crate::core::hlir::HLIRGraph, name: &str) -> usize {
+        graph
+            .topo_iter()
+            .filter(|(_, node)| node.op.name() == name)
+            .count()
+    }
 
     #[test]
     fn rhs_scalar_mul_executes() {
@@ -108,5 +116,59 @@ mod tests {
             Buffer::F32(v) => assert_eq!(v, &vec![2.0, 4.0, 6.0]),
             other => panic!("unexpected output buffer: {other:?}"),
         }
+    }
+
+    #[test]
+    fn rhs_scalar_add_executes() {
+        let cx = Context::new();
+        let x = Tensor::placeholder(&cx, DType::F32, vec![3]);
+        let z = &x + 2;
+
+        let outputs = run_context(&cx, &[z.id()], &[Buffer::F32(vec![1.0, 2.0, 3.0])])
+            .expect("run_context should succeed");
+
+        match &outputs[0] {
+            Buffer::F32(v) => assert_eq!(v, &vec![3.0, 4.0, 5.0]),
+            other => panic!("unexpected output buffer: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rhs_scalar_mul_emits_broadcast_op() {
+        let cx = Context::new();
+        let x = Tensor::placeholder(&cx, DType::F32, vec![3]);
+        let _z = &x * 2;
+
+        let graph = cx
+            .graph()
+            .lock()
+            .expect("Graph mutex should not be poisoned");
+        assert_eq!(count_ops(&graph, "Broadcast"), 1);
+        assert_eq!(count_ops(&graph, "Reshape"), 0);
+        assert_eq!(count_ops(&graph, "Expand"), 0);
+
+        let broadcast_node = graph
+            .topo_iter()
+            .find_map(|(_, node)| match node.op {
+                Op::Broadcast { .. } => Some(node),
+                _ => None,
+            })
+            .expect("expected a Broadcast node");
+        assert_eq!(broadcast_node.ty.shape.len(), 1);
+    }
+
+    #[test]
+    fn rhs_scalar_add_emits_broadcast_op() {
+        let cx = Context::new();
+        let x = Tensor::placeholder(&cx, DType::F32, vec![3]);
+        let _z = &x + 2;
+
+        let graph = cx
+            .graph()
+            .lock()
+            .expect("Graph mutex should not be poisoned");
+        assert_eq!(count_ops(&graph, "Broadcast"), 1);
+        assert_eq!(count_ops(&graph, "Reshape"), 0);
+        assert_eq!(count_ops(&graph, "Expand"), 0);
     }
 }

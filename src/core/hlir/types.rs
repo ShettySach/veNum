@@ -40,6 +40,26 @@ pub enum Scalar {
     Bool(bool),
 }
 
+macro_rules! cast_to_int_scalar {
+    ($value:expr, $variant:ident, $ty:ty) => {
+        match $value {
+            Scalar::F32(v) => Scalar::$variant(*v as $ty),
+            Scalar::F16(bits) => Scalar::$variant(f16_bits_to_f32(*bits) as $ty),
+            Scalar::BF16(bits) => Scalar::$variant(bf16_bits_to_f32(*bits) as $ty),
+            Scalar::F64(v) => Scalar::$variant(*v as $ty),
+            Scalar::I8(v) => Scalar::$variant(*v as $ty),
+            Scalar::I16(v) => Scalar::$variant(*v as $ty),
+            Scalar::I32(v) => Scalar::$variant(*v as $ty),
+            Scalar::I64(v) => Scalar::$variant(*v as $ty),
+            Scalar::U8(v) => Scalar::$variant(*v as $ty),
+            Scalar::U16(v) => Scalar::$variant(*v as $ty),
+            Scalar::U32(v) => Scalar::$variant(*v as $ty),
+            Scalar::U64(v) => Scalar::$variant(*v as $ty),
+            Scalar::Bool(v) => Scalar::$variant((*v) as $ty),
+        }
+    };
+}
+
 impl Scalar {
     pub fn dtype(&self) -> DType {
         match self {
@@ -62,8 +82,8 @@ impl Scalar {
     pub fn to_f64(&self) -> f64 {
         match self {
             Scalar::F32(v) => *v as f64,
-            Scalar::F16(bits) => f16_bits_to_f64(*bits),
-            Scalar::BF16(bits) => bf16_bits_to_f64(*bits),
+            Scalar::F16(bits) => f16_bits_to_f32(*bits) as f64,
+            Scalar::BF16(bits) => bf16_bits_to_f32(*bits) as f64,
             Scalar::F64(v) => *v,
             Scalar::I8(v) => *v as f64,
             Scalar::I16(v) => *v as f64,
@@ -96,8 +116,8 @@ impl Scalar {
             Scalar::U32(v) => *v == 0,
             Scalar::U64(v) => *v == 0,
             Scalar::Bool(v) => !v,
-            Scalar::F16(v) => *v == 0,
-            Scalar::BF16(v) => *v == 0,
+            Scalar::F16(v) => (*v & 0x7FFF) == 0,
+            Scalar::BF16(v) => (*v & 0x7FFF) == 0,
         }
     }
 
@@ -122,8 +142,8 @@ impl Scalar {
     pub fn from_f64(val: f64, dtype: DType) -> Scalar {
         match dtype {
             DType::F32 => Scalar::F32(val as f32),
-            DType::F16 => Scalar::F16(val as u16),
-            DType::BF16 => Scalar::BF16(val as u16),
+            DType::F16 => Scalar::F16(f32_to_f16_bits(val as f32)),
+            DType::BF16 => Scalar::BF16(f32_to_bf16_bits(val as f32)),
             DType::F64 => Scalar::F64(val),
             DType::I8 => Scalar::I8(val as i8),
             DType::I16 => Scalar::I16(val as i16),
@@ -136,42 +156,170 @@ impl Scalar {
             DType::Bool => Scalar::Bool(val != 0.0),
         }
     }
-}
 
-fn f16_bits_to_f64(bits: u16) -> f64 {
-    let sign = ((bits >> 15) & 1) as u64;
-    let exp = ((bits >> 10) & 0x1F) as i32;
-    let frac = (bits & 0x3FF) as u64;
-
-    if exp == 0 {
-        if frac == 0 {
-            return if sign == 1 { -0.0 } else { 0.0 };
+    pub fn cast(&self, dtype: DType) -> Scalar {
+        if self.dtype() == dtype {
+            return self.clone();
         }
-        // Subnormal
-        let val = (frac as f64) * 2.0_f64.powi(-24);
-        return if sign == 1 { -val } else { val };
+
+        match dtype {
+            DType::F32 => Scalar::F32(self.as_f32()),
+            DType::F16 => Scalar::F16(f32_to_f16_bits(self.as_f32())),
+            DType::BF16 => Scalar::BF16(f32_to_bf16_bits(self.as_f32())),
+            DType::F64 => Scalar::F64(self.to_f64()),
+            DType::I8 => cast_to_int_scalar!(self, I8, i8),
+            DType::I16 => cast_to_int_scalar!(self, I16, i16),
+            DType::I32 => cast_to_int_scalar!(self, I32, i32),
+            DType::I64 => cast_to_int_scalar!(self, I64, i64),
+            DType::U8 => cast_to_int_scalar!(self, U8, u8),
+            DType::U16 => cast_to_int_scalar!(self, U16, u16),
+            DType::U32 => cast_to_int_scalar!(self, U32, u32),
+            DType::U64 => cast_to_int_scalar!(self, U64, u64),
+            DType::Bool => Scalar::Bool(match self {
+                Scalar::F32(v) => *v != 0.0,
+                Scalar::F16(bits) => (bits & 0x7FFF) != 0,
+                Scalar::BF16(bits) => (bits & 0x7FFF) != 0,
+                Scalar::F64(v) => *v != 0.0,
+                Scalar::I8(v) => *v != 0,
+                Scalar::I16(v) => *v != 0,
+                Scalar::I32(v) => *v != 0,
+                Scalar::I64(v) => *v != 0,
+                Scalar::U8(v) => *v != 0,
+                Scalar::U16(v) => *v != 0,
+                Scalar::U32(v) => *v != 0,
+                Scalar::U64(v) => *v != 0,
+                Scalar::Bool(v) => *v,
+            }),
+        }
     }
-    if exp == 0x1F {
-        return if frac == 0 {
-            if sign == 1 {
-                f64::NEG_INFINITY
-            } else {
-                f64::INFINITY
+
+    fn as_f32(&self) -> f32 {
+        match self {
+            Scalar::F32(v) => *v,
+            Scalar::F16(bits) => f16_bits_to_f32(*bits),
+            Scalar::BF16(bits) => bf16_bits_to_f32(*bits),
+            Scalar::F64(v) => *v as f32,
+            Scalar::I8(v) => *v as f32,
+            Scalar::I16(v) => *v as f32,
+            Scalar::I32(v) => *v as f32,
+            Scalar::I64(v) => *v as f32,
+            Scalar::U8(v) => *v as f32,
+            Scalar::U16(v) => *v as f32,
+            Scalar::U32(v) => *v as f32,
+            Scalar::U64(v) => *v as f32,
+            Scalar::Bool(v) => {
+                if *v {
+                    1.0
+                } else {
+                    0.0
+                }
             }
-        } else {
-            f64::NAN
-        };
+        }
     }
-    let f64_exp = (exp - 15 + 1023) as u64;
-    let f64_frac = frac << 42; // 52 - 10 = 42
-    let f64_bits = (sign << 63) | (f64_exp << 52) | f64_frac;
-    f64::from_bits(f64_bits)
 }
 
-fn bf16_bits_to_f64(bits: u16) -> f64 {
-    // BF16 is the upper 16 bits of an f32
-    let f32_bits = (bits as u32) << 16;
-    f32::from_bits(f32_bits) as f64
+pub(crate) fn f16_bits_to_f32(bits: u16) -> f32 {
+    let sign = ((bits as u32) & 0x8000) << 16;
+    let exp = ((bits >> 10) & 0x1F) as i32;
+    let frac = (bits & 0x03FF) as u32;
+
+    let f32_bits = if exp == 0 {
+        if frac == 0 {
+            sign
+        } else {
+            let mut mantissa = frac;
+            let mut exp_unbiased = -14;
+            while (mantissa & 0x0400) == 0 {
+                mantissa <<= 1;
+                exp_unbiased -= 1;
+            }
+            let mantissa = mantissa & 0x03FF;
+            let exp_bits = ((exp_unbiased + 127) as u32) << 23;
+            sign | exp_bits | (mantissa << 13)
+        }
+    } else if exp == 0x1F {
+        sign | 0x7F80_0000 | (frac << 13)
+    } else {
+        let exp_bits = ((exp - 15 + 127) as u32) << 23;
+        sign | exp_bits | (frac << 13)
+    };
+
+    f32::from_bits(f32_bits)
+}
+
+pub(crate) fn bf16_bits_to_f32(bits: u16) -> f32 {
+    f32::from_bits((bits as u32) << 16)
+}
+
+pub(crate) fn f32_to_f16_bits(value: f32) -> u16 {
+    let bits = value.to_bits();
+    let sign = ((bits >> 16) & 0x8000) as u16;
+    let exp = ((bits >> 23) & 0xFF) as i32;
+    let frac = bits & 0x007F_FFFF;
+
+    if exp == 0xFF {
+        if frac == 0 {
+            return sign | 0x7C00;
+        }
+        let payload = ((frac >> 13) as u16) | 1;
+        return sign | 0x7C00 | payload;
+    }
+
+    let half_exp = exp - 127 + 15;
+    if half_exp >= 0x1F {
+        return sign | 0x7C00;
+    }
+
+    if half_exp <= 0 {
+        if half_exp < -10 {
+            return sign;
+        }
+
+        let mantissa = frac | 0x0080_0000;
+        let rounded = round_to_nearest_even(mantissa, (14 - half_exp) as u32);
+        if rounded == 0x0400 {
+            return sign | 0x0400;
+        }
+        return sign | (rounded as u16);
+    }
+
+    let rounded_frac = round_to_nearest_even(frac, 13);
+    if rounded_frac == 0x0400 {
+        let next_exp = half_exp + 1;
+        if next_exp >= 0x1F {
+            return sign | 0x7C00;
+        }
+        return sign | ((next_exp as u16) << 10);
+    }
+
+    sign | ((half_exp as u16) << 10) | (rounded_frac as u16)
+}
+
+pub(crate) fn f32_to_bf16_bits(value: f32) -> u16 {
+    let bits = value.to_bits();
+    if (bits & 0x7FFF_FFFF) > 0x7F80_0000 {
+        let upper = (bits >> 16) as u16;
+        return upper | 0x0040;
+    }
+    let rounding_bias = 0x7FFF + ((bits >> 16) & 1);
+    ((bits.wrapping_add(rounding_bias)) >> 16) as u16
+}
+
+fn round_to_nearest_even(value: u32, shift: u32) -> u32 {
+    if shift == 0 {
+        return value;
+    }
+
+    let truncated = value >> shift;
+    let remainder_mask = (1u32 << shift) - 1;
+    let remainder = value & remainder_mask;
+    let halfway = 1u32 << (shift - 1);
+
+    if remainder > halfway || (remainder == halfway && (truncated & 1) == 1) {
+        truncated + 1
+    } else {
+        truncated
+    }
 }
 
 impl DType {

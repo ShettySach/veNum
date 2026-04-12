@@ -175,6 +175,33 @@ impl HLIRGraph {
         self.add_node(Op::Expand { input, shape }, out_ty)
     }
 
+    pub fn broadcast(&mut self, input: NodeId, shape: Vec<Dim>) -> NodeId {
+        let in_ty = self.ty(input).clone();
+        let in_strides = in_ty.strides();
+        let in_rank = in_ty.shape.len();
+        let out_rank = shape.len();
+        let rank_offset = out_rank.saturating_sub(in_rank);
+
+        let out_strides: Vec<Dim> = shape
+            .iter()
+            .enumerate()
+            .map(|(out_idx, _)| {
+                if out_idx < rank_offset {
+                    return Dim::Const(0);
+                }
+
+                let in_idx = out_idx - rank_offset;
+                match &in_ty.shape[in_idx] {
+                    Dim::Const(1) => Dim::Const(0),
+                    _ => in_strides[in_idx].clone(),
+                }
+            })
+            .collect();
+
+        let out_ty = TensorType::strided(shape.clone(), in_ty.dtype, out_strides);
+        self.add_node(Op::Broadcast { input, shape }, out_ty)
+    }
+
     pub fn concat(&mut self, inputs: Vec<NodeId>, axis: usize) -> NodeId {
         let first = inputs[0];
         let first_ty = self.ty(first).clone();

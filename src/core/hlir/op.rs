@@ -87,6 +87,10 @@ pub enum Op {
         input: NodeId,
         shape: Vec<Dim>,
     },
+    Broadcast {
+        input: NodeId,
+        shape: Vec<Dim>,
+    },
     Concat {
         inputs: Vec<NodeId>,
         axis: usize,
@@ -117,6 +121,7 @@ impl Op {
             Op::Permute { .. } => "Permute",
             Op::Slice { .. } => "Slice",
             Op::Expand { .. } => "Expand",
+            Op::Broadcast { .. } => "Broadcast",
             Op::Concat { .. } => "Concat",
         }
     }
@@ -133,7 +138,8 @@ impl Op {
             | Op::Reshape { input, .. }
             | Op::Permute { input, .. }
             | Op::Slice { input, .. }
-            | Op::Expand { input, .. } => smallvec![*input],
+            | Op::Expand { input, .. }
+            | Op::Broadcast { input, .. } => smallvec![*input],
             Op::Add(a, b) | Op::Mul(a, b) | Op::Max(a, b) | Op::Min(a, b) => smallvec![*a, *b],
             Op::Cmp { lhs, rhs, .. } => smallvec![*lhs, *rhs],
             Op::Where {
